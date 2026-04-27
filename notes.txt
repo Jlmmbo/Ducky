@@ -1,1 +1,10 @@
 ducky: 4d vectors -> quad-vect -> quad-ec -> quack -> duck -> ducky
+
+command used to compile:
+
+x86_64-w64-mingw32-g++ src/glad.c src/main.cpp \
+  -Iinclude \
+  -Lexternal/glfw/build-win/src \
+  -lglfw3 -lopengl32 -lgdi32 -luser32 -lshell32 \
+  -o bin/ducky.exe \
+  && wine bin/ducky.exe
