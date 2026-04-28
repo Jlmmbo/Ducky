@@ -3,10 +3,18 @@
 #include <iostream>
 #include <cmath>
 
+#include "main.hpp"
+
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
+
 // Vertex shader (how to transform vertices)
 const char* vertexShaderSrc = R"(
 #version 330 core
 layout(location = 0) in vec2 aPos;
+layout(location = 1) in vec2 aTexCoord;
+
+out vec2 vTexCoord;
 
 uniform float angle;
 
@@ -20,16 +28,21 @@ void main() {
     );
 
     gl_Position = vec4(rot * aPos, 0.0, 1.0);
+    vTexCoord = aTexCoord;
 }
 )";
 
 // Fragment shader (what color to draw pixels)
 const char* fragmentShaderSrc = R"(
 #version 330 core
+
+in vec2 vTexCoord;
 out vec4 FragColor;
 
+uniform sampler2D uTexture;
+
 void main() {
-    FragColor = vec4(1.0, 0.0, 0.0, 1.0); // red
+    FragColor = texture(uTexture, vTexCoord);
 }
 )";
 
@@ -58,7 +71,7 @@ int main() {
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
-    GLFWwindow* window = glfwCreateWindow(1080, 1080, "RRT", NULL, NULL); // create a window
+    GLFWwindow* window = glfwCreateWindow(1920, 1920, "RRT", NULL, NULL); // create a window
     glfwMakeContextCurrent(window); // make the OpenGL context current (enable GPU communication)
 
     if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) {
@@ -68,9 +81,10 @@ int main() {
 
     // Triangle vertices
     float vertices[] = {
-        0.0f,  0.0f,
-        0.5f,  0.0f,
-        0.5f, -0.2f
+        // x,   y,   u,   v
+        .0f,  .0f, .0f, .0f,
+        .5f,  .0f, .5f, .0f,
+        .5f, -.2f, .5f, -.2f
     };
 
     unsigned int VBO, VAO; // create vertex and vertex array buffer objects
@@ -82,10 +96,13 @@ int main() {
     glBindBuffer(GL_ARRAY_BUFFER, VBO); // use VBO to store vertex data
     glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW); // tell gpu what to store in its VBO. STATIC because transformations happen in a shader, not on CPU
 
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void*)0); //define how to interpret vertex data
-    //(index, size, type, normalized, stride(byte offset), pointer)
+    // Position attribute (location 0)
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
     glEnableVertexAttribArray(0);
 
+    // Texture coordinate attribute (location 1)
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(2 * sizeof(float)));
+    glEnableVertexAttribArray(1);
 
     // Shader program
     // shaders are stored as handles
@@ -98,6 +115,39 @@ int main() {
 
     glDeleteShader(vertshader); // we dont need them anymore
     glDeleteShader(fragshader);
+
+    // Texture stuff
+    // load image
+    int width, height, channels;
+    unsigned char* data = stbi_load("src/00001.png", &width, &height, &channels, 4);
+    if (!data) {
+        std::cerr << "Failed to load texture\n";
+        return -1;
+    }
+
+    unsigned int textureID;
+    glGenTextures(1, &textureID);
+    glBindTexture(GL_TEXTURE_2D, textureID);
+
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA,
+             width, height, 0,
+             GL_RGBA, GL_UNSIGNED_BYTE, data);
+
+
+             /////////////////////////////////////AI/////////////////////////////
+
+    // Set texture parameters
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    //////////////////////////////////////////////////////////////////
+
+    stbi_image_free(data);
+
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, textureID);
+    glUniform1i(glGetUniformLocation(shaderProgram, "uTexture"), 0);
 
     glUseProgram(shaderProgram); //choose which program to use
 
