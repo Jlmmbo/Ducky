@@ -90,7 +90,11 @@ out vec4 FragColor;
 uniform sampler2D uTexture;
 
 void main() {
-    FragColor = texture(uTexture, vTexCoord);
+    // Show UV coordinates as colors (U=red, V=green)
+    FragColor = vec4(vTexCoord.x, vTexCoord.y, 0.0, 1.0);
+    
+    // Normal texture sampling
+    // FragColor = texture(uTexture, vTexCoord);
 }
 )";
 
@@ -166,9 +170,12 @@ int main() {
     unsigned int textureID;
     glGenTextures(1, &textureID);
     glBindTexture(GL_TEXTURE_2D, textureID);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
+glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
+        std::cout << "Texture loaded: " << width << "x" << height << " channels=" << channels << std::endl;
     stbi_image_free(data);
 
     glActiveTexture(GL_TEXTURE0);
