@@ -9,37 +9,73 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
 
-// Vertex shader (how to transform vertices)
 const char* vertexShaderSrc = R"(
 #version 330 core
-layout(location = 0) in vec4 aPos; // x, y, z, w
+layout(location = 0) in vec4 aPos;
 layout(location = 1) in vec2 aTexCoord;
 
 out vec2 vTexCoord;
 
-uniform float angle4d;
-uniform vec4 camera4d;
-uniform vec3 camera3d;
+uniform float angleXY;
+uniform float angleXZ;
+uniform float angleXW;
+uniform float angleYZ;
+uniform float angleYW;
+uniform float angleZW;
+uniform vec4 translation;
 
 void main() {
-    // 4D rotation (rotate in XW plane)
-    float c = cos(angle4d);
-    float s = sin(angle4d);
-    float x = aPos.x;
-    float w = aPos.w;
-    float newX = x * c - w * s;
-    float newW = x * s + w * c;
+    float x = aPos.x + translation.x;
+    float y = aPos.y + translation.y;
+    float z = aPos.z + translation.z;
+    float w = aPos.w + translation.w;
 
-    // 4D to 3D perspective projection
-    float dist4d = 3.0;
-    float wDepth = dist4d - aPos.w;
-    float scale4d = dist4d / wDepth;
-    vec3 p3 = vec3(newX, aPos.y, aPos.z) * scale4d;
+    float c, s, nx, ny, nz, nw;
 
-    // 3D to 2D perspective projection
-    float dist3d = 2.0;
-    float zDepth = dist3d + p3.z;
-    float scale3d = dist3d / zDepth;
+    // XY rotation
+    c = cos(angleXY); s = sin(angleXY);
+    nx = x * c - y * s;
+    ny = x * s + y * c;
+    x = nx; y = ny;
+
+    // XZ rotation
+    c = cos(angleXZ); s = sin(angleXZ);
+    nx = x * c - z * s;
+    nz = x * s + z * c;
+    x = nx; z = nz;
+
+    // XW rotation
+    c = cos(angleXW); s = sin(angleXW);
+    nx = x * c - w * s;
+    nw = x * s + w * c;
+    x = nx; w = nw;
+
+    // YZ rotation
+    c = cos(angleYZ); s = sin(angleYZ);
+    ny = y * c - z * s;
+    nz = y * s + z * c;
+    y = ny; z = nz;
+
+    // YW rotation
+    c = cos(angleYW); s = sin(angleYW);
+    ny = y * c - w * s;
+    nw = y * s + w * c;
+    y = ny; w = nw;
+
+    // ZW rotation
+    c = cos(angleZW); s = sin(angleZW);
+    nz = z * c - w * s;
+    nw = z * s + w * c;
+    z = nz; w = nw;
+
+    float dist4d = 4.0;
+    float wDepth = dist4d - w;
+    float scale4d = clamp(dist4d / wDepth, 0.1, 10.0);
+    vec3 p3 = vec3(x, y, z) * scale4d;
+
+    float dist3d = 3.0;
+    float zDepth = dist3d - p3.z;
+    float scale3d = clamp(dist3d / max(zDepth, 0.1), 0.1, 10.0);
     vec2 p2 = p3.xy * scale3d;
 
     gl_Position = vec4(p2, 0.0, 1.0);
@@ -47,13 +83,10 @@ void main() {
 }
 )";
 
-// Fragment shader (what color to draw pixels)
 const char* fragmentShaderSrc = R"(
 #version 330 core
-
 in vec2 vTexCoord;
 out vec4 FragColor;
-
 uniform sampler2D uTexture;
 
 void main() {
@@ -61,75 +94,51 @@ void main() {
 }
 )";
 
-static void checkShader(unsigned int shader) {
-    int success;
-    char log[512];
-    glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
-    if (!success) {
-        glGetShaderInfoLog(shader, 512, NULL, log);
-        std::cout << "Shader error:\n" << log << std::endl;
-    }
-}
-
 static unsigned int compileShader(unsigned int type, const char* src) {
     unsigned int shader = glCreateShader(type);
     glShaderSource(shader, 1, &src, NULL);
     glCompileShader(shader);
-    checkShader(shader);
+    int success;
+    glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
+    if (!success) {
+        char log[512];
+        glGetShaderInfoLog(shader, 512, NULL, log);
+        std::cout << "Shader error:\n" << log << std::endl;
+    }
     return shader;
 }
 
 int main() {
-    std::cout << "Starting program..." << std::endl;
-    glfwInit(); // initialize GLFW
-    std::cout << "GLFW initialized" << std::endl;
+    glfwInit();
 
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
-    std::cout << "Creating window..." << std::endl;
-    GLFWwindow* window = glfwCreateWindow(1920, 1920, "RRT", NULL, NULL); // create a window
-    std::cout << "Window created: " << (window ? "yes" : "no") << std::endl;
+    GLFWwindow* window = glfwCreateWindow(1920, 1920, "4D Tesseract", NULL, NULL);
     if (!window) {
         std::cerr << "Failed to create window\n";
         return -1;
     }
-    glfwMakeContextCurrent(window); // make the OpenGL context current (enable GPU communication)
+    glfwMakeContextCurrent(window);
 
     if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) {
         std::cout << "Failed to init GLAD\n";
         return -1;
-    } // tell OpenGL where to find the OpenGL functions
+    }
 
     glViewport(0, 0, 1920, 1920);
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-    std::cout << "Loading model..." << std::endl;
     Model model = LoadModel("model.dky");
     std::cout << "Loaded " << model.vertexCount << " vertices, " << model.indexCount << " indices\n";
-    std::cout << "First vertex: " << model.vertices[0] << " " << model.vertices[1] << " " << model.vertices[2] << " " << model.vertices[3] << std::endl;
-    std::cout << "Vertices: ";
-    for (unsigned int i = 0; i < model.vertexCount * 4; i++) std::cout << model.vertices[i] << " ";
-    std::cout << "\nIndices: ";
-    for (unsigned int i = 0; i < model.indexCount; i++) std::cout << model.indices[i] << " ";
-    std::cout << "\n";
-    if (!model.vertices) {
-        std::cerr << "Vertices is NULL!\n";
-        return -1;
-    }
 
     unsigned int VBO, VAO, EBO;
     glGenVertexArrays(1, &VAO);
     glGenBuffers(1, &VBO);
     glGenBuffers(1, &EBO);
-    std::cout << "Generated buffers\n";
 
     glBindVertexArray(VAO);
-    std::cout << "Bound VAO\n";
-
-glBindBuffer(GL_ARRAY_BUFFER, VBO);
+    glBindBuffer(GL_ARRAY_BUFFER, VBO);
     glBufferData(GL_ARRAY_BUFFER, model.vertexCount * 6 * sizeof(float), model.vertices, GL_STATIC_DRAW);
 
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
@@ -137,85 +146,78 @@ glBindBuffer(GL_ARRAY_BUFFER, VBO);
 
     glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)0);
     glEnableVertexAttribArray(0);
-
     glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)(4 * sizeof(float)));
     glEnableVertexAttribArray(1);
 
-    // Shader program
-    // shaders are stored as handles
     unsigned int vertshader = compileShader(GL_VERTEX_SHADER, vertexShaderSrc);
     unsigned int fragshader = compileShader(GL_FRAGMENT_SHADER, fragmentShaderSrc);
-    unsigned int shaderProgram = glCreateProgram(); // create a shader program
+    unsigned int shaderProgram = glCreateProgram();
     glAttachShader(shaderProgram, vertshader);
     glAttachShader(shaderProgram, fragshader);
     glLinkProgram(shaderProgram);
 
-    int success;
-    glGetProgramiv(shaderProgram, GL_LINK_STATUS, &success);
-    if (!success) {
-        char log[512];
-        glGetProgramInfoLog(shaderProgram, 512, NULL, log);
-        std::cout << "Program link error:\n" << log << "\n";
-    }
-
-    glDeleteShader(vertshader); // we dont need them anymore
-    glDeleteShader(fragshader);
-
-    GLenum err = glGetError();
-    if (err) std::cout << "GL error after shader setup: " << err << "\n";
-
-    // Texture stuff
-    // load image
     int width, height, channels;
     unsigned char* data = stbi_load("00001.png", &width, &height, &channels, 4);
     if (!data) {
         std::cerr << "Failed to load texture\n";
         return -1;
     }
-    std::cout << "Loaded texture: " << width << "x" << height << " channels=" << channels << "\n";
 
     unsigned int textureID;
     glGenTextures(1, &textureID);
     glBindTexture(GL_TEXTURE_2D, textureID);
-
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA,
-             width, height, 0,
-             GL_RGBA, GL_UNSIGNED_BYTE, data);
-
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
     stbi_image_free(data);
 
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, textureID);
     glUniform1i(glGetUniformLocation(shaderProgram, "uTexture"), 0);
+    glUseProgram(shaderProgram);
 
-    glUseProgram(shaderProgram); //choose which program to use
-
-    float angle4d = 0.0f;
+    float angleXY = 0.0f, angleXZ = 0.0f, angleXW = 0.0f;
+    float angleYZ = 0.0f, angleYW = 0.0f, angleZW = 0.0f;
+    float transX = 0.0f, transY = 0.0f, transZ = 0.0f, transW = 0.0f;
 
     while (!glfwWindowShouldClose(window)) {
-        glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
+        if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) transX += 0.02f;
+        if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) transX -= 0.02f;
+        if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) transY += 0.02f;
+        if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) transY -= 0.02f;
+        if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS) transZ += 0.02f;
+        if (glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS) transZ -= 0.02f;
+        if (glfwGetKey(window, GLFW_KEY_Z) == GLFW_PRESS) transW += 0.02f;
+        if (glfwGetKey(window, GLFW_KEY_X) == GLFW_PRESS) transW -= 0.02f;
+
+        if (glfwGetKey(window, GLFW_KEY_1) == GLFW_PRESS) angleXY += 0.02f;
+        if (glfwGetKey(window, GLFW_KEY_2) == GLFW_PRESS) angleXY -= 0.02f;
+        if (glfwGetKey(window, GLFW_KEY_3) == GLFW_PRESS) angleXZ += 0.02f;
+        if (glfwGetKey(window, GLFW_KEY_4) == GLFW_PRESS) angleXZ -= 0.02f;
+        if (glfwGetKey(window, GLFW_KEY_5) == GLFW_PRESS) angleXW += 0.02f;
+        if (glfwGetKey(window, GLFW_KEY_6) == GLFW_PRESS) angleXW -= 0.02f;
+        if (glfwGetKey(window, GLFW_KEY_7) == GLFW_PRESS) angleYZ += 0.02f;
+        if (glfwGetKey(window, GLFW_KEY_8) == GLFW_PRESS) angleYZ -= 0.02f;
+        if (glfwGetKey(window, GLFW_KEY_9) == GLFW_PRESS) angleYW += 0.02f;
+        if (glfwGetKey(window, GLFW_KEY_0) == GLFW_PRESS) angleYW -= 0.02f;
+        if (glfwGetKey(window, GLFW_KEY_MINUS) == GLFW_PRESS) angleZW += 0.02f;
+        if (glfwGetKey(window, GLFW_KEY_EQUAL) == GLFW_PRESS) angleZW -= 0.02f;
+
+        glClearColor(0.05f, 0.05f, 0.1f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
 
-        angle4d += 0.01f;
+        glUniform1f(glGetUniformLocation(shaderProgram, "angleXY"), angleXY);
+        glUniform1f(glGetUniformLocation(shaderProgram, "angleXZ"), angleXZ);
+        glUniform1f(glGetUniformLocation(shaderProgram, "angleXW"), angleXW);
+        glUniform1f(glGetUniformLocation(shaderProgram, "angleYZ"), angleYZ);
+        glUniform1f(glGetUniformLocation(shaderProgram, "angleYW"), angleYW);
+        glUniform1f(glGetUniformLocation(shaderProgram, "angleZW"), angleZW);
+        glUniform4f(glGetUniformLocation(shaderProgram, "translation"), transX, transY, transZ, transW);
 
-        int angleLoc = glGetUniformLocation(shaderProgram, "angle4d");
-        glUniform1f(angleLoc, angle4d);
-
-        glBindVertexArray(VAO); // update vertex positions
-        GLenum err = glGetError();
-        if (err) std::cout << "GL error before clear: " << err << "\n";
-
+        glBindVertexArray(VAO);
         glDrawElements(GL_TRIANGLES, model.indexCount, GL_UNSIGNED_INT, 0);
 
-        err = glGetError();
-        if (err) std::cout << "GL error after draw: " << err << "\n";
-
-        glfwSwapBuffers(window); // update frame
+        glfwSwapBuffers(window);
         glfwPollEvents();
     }
 

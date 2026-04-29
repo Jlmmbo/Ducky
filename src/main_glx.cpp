@@ -1,8 +1,10 @@
 #include <X11/X.h>
 #include <X11/Xlib.h>
+#include <X11/keysym.h>
 #include <iostream>
 #include <cmath>
 #include <cstring>
+#include <unistd.h>
 
 #include <glad/glad.h>
 #include <GL/gl.h>
@@ -17,29 +19,58 @@ layout(location = 0) in vec4 aPos;
 layout(location = 1) in vec2 aTexCoord;
 
 out vec2 vTexCoord;
+out float vDepth;
 
 uniform float angle4d;
+uniform float angle4dY;
+uniform float angle4dZ;
+uniform vec4 translation;
 
 void main() {
-    float c = cos(angle4d);
-    float s = sin(angle4d);
-    float x = aPos.x;
-    float w = aPos.w;
-    float newX = x * c - w * s;
-    float newW = x * s + w * c;
+    float x = aPos.x + translation.x;
+    float y = aPos.y + translation.y;
+    float z = aPos.z + translation.z;
+    float w = aPos.w + translation.w;
 
-    float dist4d = 3.0;
-    float wDepth = dist4d - aPos.w;
-    float scale4d = dist4d / wDepth;
-    vec3 p3 = vec3(newX, aPos.y, aPos.z) * scale4d;
+    // XW rotation
+    float cx = cos(angle4d);
+    float sx = sin(angle4d);
+    float newX = x * cx - w * sx;
+    float newW = x * sx + w * cx;
+    x = newX;
+    w = newW;
 
-    float dist3d = 2.0;
-    float zDepth = dist3d + p3.z;
-    float scale3d = dist3d / zDepth;
+    // YW rotation
+    float cy = cos(angle4dY);
+    float sy = sin(angle4dY);
+    float newY = y * cy - w * sy;
+    newW = y * sy + w * cy;
+    y = newY;
+    w = newW;
+
+    // ZW rotation
+    float cz = cos(angle4dZ);
+    float sz = sin(angle4dZ);
+    float newZ = z * cz - w * sz;
+    newW = z * sz + w * cz;
+    z = newZ;
+    w = newW;
+
+    // 4D to 3D with better depth handling
+    float dist4d = 4.0;
+    float wDepth = dist4d - w;
+    float scale4d = clamp(dist4d / wDepth, 0.1, 10.0);
+    vec3 p3 = vec3(x, y, z) * scale4d;
+
+    // 3D to 2D
+    float dist3d = 3.0;
+    float zDepth = dist3d - p3.z;
+    float scale3d = clamp(dist3d / max(zDepth, 0.1), 0.1, 10.0);
     vec2 p2 = p3.xy * scale3d;
 
     gl_Position = vec4(p2, 0.0, 1.0);
     vTexCoord = aTexCoord;
+    vDepth = wDepth * zDepth;
 }
 )";
 
@@ -111,12 +142,27 @@ int main() {
     }
     std::cout << "Created GL context" << std::endl;
 
-    Window win = XCreateWindow(display, root, 0, 0, 1920, 1920, 0, CopyFromParent, InputOutput, CopyFromParent, 0, NULL);
+    Window win = XCreateWindow(display, root, 100, 100, 800, 600, 0, CopyFromParent, InputOutput, CopyFromParent, 0, NULL);
+    XSelectInput(display, win, KeyPressMask | KeyReleaseMask | ExposureMask | StructureNotifyMask);
     XMapWindow(display, win);
     XStoreName(display, win, "4D Tesseract");
 
+    // Wait for window to get focus
+    XFlush(display);
+    usleep(100000);
+
+    // Try to grab keyboard
+    int grabResult = XGrabKeyboard(display, win, True, GrabModeAsync, GrabModeAsync, CurrentTime);
+    std::cout << "Keyboard grab result: " << grabResult << std::endl;
+
     glXMakeContextCurrent(display, win, win, ctx);
     std::cout << "Made GL context current" << std::endl;
+
+    if (!gladLoadGLLoader((GLADloadproc)glXGetProcAddress)) {
+        std::cerr << "Failed to load GL\n";
+        return -1;
+    }
+    std::cout << "GL loaded" << std::endl;
 
     // Load model
     FILE* file = fopen("model.dky", "r");
@@ -205,21 +251,75 @@ int main() {
     glUniform1i(glGetUniformLocation(program, "uTexture"), 0);
 
     float angle4d = 0.0f;
+    float angle4dY = 0.0f;
+    float angle4dZ = 0.0f;
+    float transX = 0.0f, transY = 0.0f, transZ = 0.0f, transW = 0.0f;
+
+    int keys[256] = {0};
+    int frame = 0;
+
     while (1) {
-        XEvent evt;
-        if (XPending(display)) {
+        frame++;
+        // Handle events without blocking
+        while (XPending(display)) {
+            XEvent evt;
             XNextEvent(display, &evt);
-            if (evt.type == KeyPress || evt.type == DestroyNotify) break;
+            if (evt.type == KeyPress || evt.type == KeyRelease) {
+                int keycode = evt.xkey.keycode;
+                keys[keycode] = (evt.type == KeyPress);
+            }
+            if (evt.type == DestroyNotify) break;
         }
 
-        glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
+        // Also poll key states directly
+        char keys_return[32];
+        XQueryKeymap(display, keys_return);
+        for (int i = 0; i < 256; i++) {
+            if (keys_return[i/8] & (1 << (i%8))) {
+                keys[i] = 1;
+            }
+        }
+
+        // Translation (WASDQE) - using X11 keycodes
+        // w=25, s=39, a=38, d=40, q=24, e=26
+        if (keys[25]) transX += 0.02f;
+        if (keys[39]) transX -= 0.02f;
+        if (keys[38]) transY += 0.02f;
+        if (keys[40]) transY -= 0.02f;
+        if (keys[24]) transZ += 0.02f;
+        if (keys[26]) transZ -= 0.02f;
+
+        // 4D W translation (t=28, y=29)
+        if (keys[28]) transW += 0.02f;
+        if (keys[29]) transW -= 0.02f;
+
+        // Manual rotation (IJKLUO) - i=31, k=45, j=44, l=46, u=30, o=32
+        if (keys[31]) angle4d += 0.02f;
+        if (keys[45]) angle4d -= 0.02f;
+        if (keys[44]) angle4dY += 0.02f;
+        if (keys[46]) angle4dY -= 0.02f;
+        if (keys[30]) angle4dZ += 0.02f;
+        if (keys[32]) angle4dZ -= 0.02f;
+
+        // Auto-rotate if no manual input
+        bool manual = keys[31] || keys[45] || keys[44] || keys[46] || keys[30] || keys[32];
+        if (!manual) {
+            angle4d += 0.005f;
+            angle4dY += 0.003f;
+            angle4dZ += 0.002f;
+        }
+
+        glClearColor(0.05f, 0.05f, 0.1f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
 
-        angle4d += 0.01f;
         glUniform1f(glGetUniformLocation(program, "angle4d"), angle4d);
+        glUniform1f(glGetUniformLocation(program, "angle4dY"), angle4dY);
+        glUniform1f(glGetUniformLocation(program, "angle4dZ"), angle4dZ);
+        glUniform4f(glGetUniformLocation(program, "translation"), transX, transY, transZ, transW);
 
         glBindVertexArray(VAO);
         glDrawElements(GL_TRIANGLES, indexCount, GL_UNSIGNED_INT, 0);
+        if (frame % 60 == 0) std::cout << "Frame " << frame << std::endl;
 
         glXSwapBuffers(display, win);
     }
