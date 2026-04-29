@@ -2,6 +2,7 @@
 #include <GLFW/glfw3.h>
 #include <iostream>
 #include <cmath>
+#include <cstring>
 
 #include "main.hpp"
 
@@ -79,28 +80,42 @@ int main() {
         return -1;
     } // tell OpenGL where to find the OpenGL functions
 
-    // Triangle vertices
-    float vertices[] = {
-        // x,   y,   u,   v
-        .0f,  .0f, .0f, .0f,
-        .5f,  .0f, .5f, .0f,
-        .5f, -.2f, .5f, -.2f
-    };
+    glViewport(0, 0, 1920, 1920);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-    unsigned int VBO, VAO; // create vertex and vertex array buffer objects
+Model model = LoadModel("model.dky");
+    std::cout << "Loaded " << model.vertexCount << " vertices, " << model.indexCount << " indices\n";
+    std::cout << "Vertices: ";
+    for (unsigned int i = 0; i < model.vertexCount * 4; i++) std::cout << model.vertices[i] << " ";
+    std::cout << "\nIndices: ";
+    for (unsigned int i = 0; i < model.indexCount; i++) std::cout << model.indices[i] << " ";
+    std::cout << "\n";
+    if (!model.vertices) {
+        std::cerr << "Vertices is NULL!\n";
+        return -1;
+    }
+
+    unsigned int VBO, VAO, EBO;
     glGenVertexArrays(1, &VAO);
     glGenBuffers(1, &VBO);
+    glGenBuffers(1, &EBO);
+    std::cout << "After gen buffers\n";
 
-    glBindVertexArray(VAO); // use VAO to store vertex array
+    glBindVertexArray(VAO);
+    std::cout << "After bind VAO\n";
 
-    glBindBuffer(GL_ARRAY_BUFFER, VBO); // use VBO to store vertex data
-    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW); // tell gpu what to store in its VBO. STATIC because transformations happen in a shader, not on CPU
+    glBindBuffer(GL_ARRAY_BUFFER, VBO);
+    glBufferData(GL_ARRAY_BUFFER, model.vertexCount * 4 * sizeof(float), model.vertices, GL_STATIC_DRAW);
+    std::cout << "After buffer VBO\n";
 
-    // Position attribute (location 0)
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, model.indexCount * sizeof(unsigned int), model.indices, GL_STATIC_DRAW);
+    std::cout << "After buffer EBO\n";
+
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
     glEnableVertexAttribArray(0);
 
-    // Texture coordinate attribute (location 1)
     glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(2 * sizeof(float)));
     glEnableVertexAttribArray(1);
 
@@ -111,37 +126,44 @@ int main() {
     unsigned int shaderProgram = glCreateProgram(); // create a shader program
     glAttachShader(shaderProgram, vertshader);
     glAttachShader(shaderProgram, fragshader);
-    glLinkProgram(shaderProgram);// create the executable shader program by linking the compiled shaders together
+    glLinkProgram(shaderProgram);
+
+    int success;
+    glGetProgramiv(shaderProgram, GL_LINK_STATUS, &success);
+    if (!success) {
+        char log[512];
+        glGetProgramInfoLog(shaderProgram, 512, NULL, log);
+        std::cout << "Program link error:\n" << log << "\n";
+    }
 
     glDeleteShader(vertshader); // we dont need them anymore
     glDeleteShader(fragshader);
 
+    GLenum err = glGetError();
+    if (err) std::cout << "GL error after shader setup: " << err << "\n";
+
     // Texture stuff
     // load image
     int width, height, channels;
-    unsigned char* data = stbi_load("src/00001.png", &width, &height, &channels, 4);
+    unsigned char* data = stbi_load("00001.png", &width, &height, &channels, 4);
     if (!data) {
         std::cerr << "Failed to load texture\n";
         return -1;
     }
+    std::cout << "Loaded texture: " << width << "x" << height << " channels=" << channels << "\n";
 
     unsigned int textureID;
     glGenTextures(1, &textureID);
     glBindTexture(GL_TEXTURE_2D, textureID);
 
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA,
              width, height, 0,
              GL_RGBA, GL_UNSIGNED_BYTE, data);
-
-
-             /////////////////////////////////////AI/////////////////////////////
-
-    // Set texture parameters
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-    //////////////////////////////////////////////////////////////////
 
     stbi_image_free(data);
 
@@ -163,7 +185,13 @@ int main() {
         glUniform1f(angleLoc, angle);
 
         glBindVertexArray(VAO); // update vertex positions
-        glDrawArrays(GL_TRIANGLES, 0, 3); // call shaders
+        GLenum err = glGetError();
+        if (err) std::cout << "GL error before clear: " << err << "\n";
+
+        glDrawElements(GL_TRIANGLES, model.indexCount, GL_UNSIGNED_INT, 0);
+
+        err = glGetError();
+        if (err) std::cout << "GL error after draw: " << err << "\n";
 
         glfwSwapBuffers(window); // update frame
         glfwPollEvents();

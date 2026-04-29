@@ -1,0 +1,10 @@
+// Simple model format:
+// vertices: x y u v
+// faces: i j k (vertex indices)
+0.0 0.0 0.0 0.0
+1.0 0.0 1.0 0.0
+1.0 1.0 1.0 1.0
+0.0 1.0 0.0 1.0
+faces
+0 1 2
+0 2 3
