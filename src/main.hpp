@@ -9,7 +9,7 @@ struct Color {
 };
 
 struct Model{
-    float* vertices; //x y u v per vertex
+    float* vertices; //x y z w u v per vertex
     unsigned int vertexCount;
     unsigned int* indices; //face indices
     unsigned int indexCount;
@@ -63,18 +63,20 @@ Model LoadModel(const char* path){
         }
 
         if (section == 0) {
-            float x, y, u, v;
-            if (sscanf(line, "%f %f %f %f", &x, &y, &u, &v) == 4) {
-                float* newverts = new float[(model.vertexCount + 1) * 4];
+            float x, y, z, w, u, v;
+            if (sscanf(line, "%f %f %f %f %f %f", &x, &y, &z, &w, &u, &v) == 6) {
+                float* newverts = new float[(model.vertexCount + 1) * 6];
                 if (model.vertices) {
-                    memcpy(newverts, model.vertices, model.vertexCount * 4 * sizeof(float));
+                    memcpy(newverts, model.vertices, model.vertexCount * 6 * sizeof(float));
                     delete[] model.vertices;
                 }
                 model.vertices = newverts;
-                model.vertices[model.vertexCount * 4] = x;
-                model.vertices[model.vertexCount * 4 + 1] = y;
-                model.vertices[model.vertexCount * 4 + 2] = u;
-                model.vertices[model.vertexCount * 4 + 3] = v;
+                model.vertices[model.vertexCount * 6] = x;
+                model.vertices[model.vertexCount * 6 + 1] = y;
+                model.vertices[model.vertexCount * 6 + 2] = z;
+                model.vertices[model.vertexCount * 6 + 3] = w;
+                model.vertices[model.vertexCount * 6 + 4] = u;
+                model.vertices[model.vertexCount * 6 + 5] = v;
                 model.vertexCount++;
             }
         } else if (section == 1) {

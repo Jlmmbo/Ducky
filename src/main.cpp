@@ -12,23 +12,37 @@
 // Vertex shader (how to transform vertices)
 const char* vertexShaderSrc = R"(
 #version 330 core
-layout(location = 0) in vec2 aPos;
+layout(location = 0) in vec4 aPos; // x, y, z, w
 layout(location = 1) in vec2 aTexCoord;
 
 out vec2 vTexCoord;
 
-uniform float angle;
+uniform float angle4d;
+uniform vec4 camera4d;
+uniform vec3 camera3d;
 
 void main() {
-    float c = cos(angle);
-    float s = sin(angle);
+    // 4D rotation (rotate in XW plane)
+    float c = cos(angle4d);
+    float s = sin(angle4d);
+    float x = aPos.x;
+    float w = aPos.w;
+    float newX = x * c - w * s;
+    float newW = x * s + w * c;
 
-    mat2 rot = mat2(
-        c, -s,
-        s,  c
-    );
+    // 4D to 3D perspective projection
+    float dist4d = 3.0;
+    float wDepth = dist4d - aPos.w;
+    float scale4d = dist4d / wDepth;
+    vec3 p3 = vec3(newX, aPos.y, aPos.z) * scale4d;
 
-    gl_Position = vec4(rot * aPos, 0.0, 1.0);
+    // 3D to 2D perspective projection
+    float dist3d = 2.0;
+    float zDepth = dist3d + p3.z;
+    float scale3d = dist3d / zDepth;
+    vec2 p2 = p3.xy * scale3d;
+
+    gl_Position = vec4(p2, 0.0, 1.0);
     vTexCoord = aTexCoord;
 }
 )";
@@ -66,13 +80,21 @@ static unsigned int compileShader(unsigned int type, const char* src) {
 }
 
 int main() {
+    std::cout << "Starting program..." << std::endl;
     glfwInit(); // initialize GLFW
+    std::cout << "GLFW initialized" << std::endl;
 
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
+    std::cout << "Creating window..." << std::endl;
     GLFWwindow* window = glfwCreateWindow(1920, 1920, "RRT", NULL, NULL); // create a window
+    std::cout << "Window created: " << (window ? "yes" : "no") << std::endl;
+    if (!window) {
+        std::cerr << "Failed to create window\n";
+        return -1;
+    }
     glfwMakeContextCurrent(window); // make the OpenGL context current (enable GPU communication)
 
     if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) {
@@ -84,8 +106,10 @@ int main() {
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-Model model = LoadModel("model.dky");
+    std::cout << "Loading model..." << std::endl;
+    Model model = LoadModel("model.dky");
     std::cout << "Loaded " << model.vertexCount << " vertices, " << model.indexCount << " indices\n";
+    std::cout << "First vertex: " << model.vertices[0] << " " << model.vertices[1] << " " << model.vertices[2] << " " << model.vertices[3] << std::endl;
     std::cout << "Vertices: ";
     for (unsigned int i = 0; i < model.vertexCount * 4; i++) std::cout << model.vertices[i] << " ";
     std::cout << "\nIndices: ";
@@ -100,23 +124,21 @@ Model model = LoadModel("model.dky");
     glGenVertexArrays(1, &VAO);
     glGenBuffers(1, &VBO);
     glGenBuffers(1, &EBO);
-    std::cout << "After gen buffers\n";
+    std::cout << "Generated buffers\n";
 
     glBindVertexArray(VAO);
-    std::cout << "After bind VAO\n";
+    std::cout << "Bound VAO\n";
 
-    glBindBuffer(GL_ARRAY_BUFFER, VBO);
-    glBufferData(GL_ARRAY_BUFFER, model.vertexCount * 4 * sizeof(float), model.vertices, GL_STATIC_DRAW);
-    std::cout << "After buffer VBO\n";
+glBindBuffer(GL_ARRAY_BUFFER, VBO);
+    glBufferData(GL_ARRAY_BUFFER, model.vertexCount * 6 * sizeof(float), model.vertices, GL_STATIC_DRAW);
 
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, model.indexCount * sizeof(unsigned int), model.indices, GL_STATIC_DRAW);
-    std::cout << "After buffer EBO\n";
 
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
+    glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)0);
     glEnableVertexAttribArray(0);
 
-    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(2 * sizeof(float)));
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)(4 * sizeof(float)));
     glEnableVertexAttribArray(1);
 
     // Shader program
@@ -173,16 +195,16 @@ Model model = LoadModel("model.dky");
 
     glUseProgram(shaderProgram); //choose which program to use
 
-    float angle = 0.0f;
+    float angle4d = 0.0f;
 
     while (!glfwWindowShouldClose(window)) {
         glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
 
-        angle += 0.01f;
+        angle4d += 0.01f;
 
-        int angleLoc = glGetUniformLocation(shaderProgram, "angle");
-        glUniform1f(angleLoc, angle);
+        int angleLoc = glGetUniformLocation(shaderProgram, "angle4d");
+        glUniform1f(angleLoc, angle4d);
 
         glBindVertexArray(VAO); // update vertex positions
         GLenum err = glGetError();
