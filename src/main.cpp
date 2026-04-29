@@ -4,6 +4,9 @@
 #include <cmath>
 #include <cstring>
 
+#define GUI_DEFAULT_WIDTH  5.0f
+#define GUI_DEFAULT_HEIGHT 500.0f
+
 #include "main.hpp"
 
 #define STB_IMAGE_IMPLEMENTATION
@@ -11,6 +14,11 @@
 
 #define STB_EASY_FONT_IMPLEMENTATION
 #include "stb_easy_font.h"
+
+// ImGui includes
+#include "imgui.h"
+#include "imgui_impl_glfw.h"
+#include "imgui_impl_opengl3.h"
 
 const char* vertexShaderSrc = R"(
 #version 330 core
@@ -35,37 +43,30 @@ void main() {
 
     float c, s, nx, ny, nz, nw;
 
-    // XY rotation
     c = cos(angleXY); s = sin(angleXY);
     nx = x * c - y * s; ny = x * s + y * c;
     x = nx; y = ny;
 
-    // XZ rotation
     c = cos(angleXZ); s = sin(angleXZ);
     nx = x * c - z * s; nz = x * s + z * c;
     x = nx; z = nz;
 
-    // XW rotation
     c = cos(angleXW); s = sin(angleXW);
     nx = x * c - w * s; nw = x * s + w * c;
     x = nx; w = nw;
 
-    // YZ rotation
     c = cos(angleYZ); s = sin(angleYZ);
     ny = y * c - z * s; nz = y * s + z * c;
     y = ny; z = nz;
 
-    // YW rotation
     c = cos(angleYW); s = sin(angleYW);
     ny = y * c - w * s; nw = y * s + w * c;
     y = ny; w = nw;
 
-    // ZW rotation
     c = cos(angleZW); s = sin(angleZW);
     nz = z * c - w * s; nw = z * s + w * c;
     z = nz; w = nw;
 
-    // Projection
     float dist4d = 4.0;
     float wDepth = dist4d - w;
     float scale4d = clamp(dist4d / wDepth, 0.1, 10.0);
@@ -219,6 +220,16 @@ int main() {
 
     glViewport(0, 0, 1920, 1920);
 
+    // Setup ImGui context
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGuiIO& io = ImGui::GetIO(); (void)io;
+    ImGui::StyleColorsDark();
+
+    // Setup Platform/Renderer backends
+    ImGui_ImplGlfw_InitForOpenGL(window, true);
+    ImGui_ImplOpenGL3_Init("#version 330 core");
+
     Model model = LoadModel("model.dky");
     std::cout << "Loaded " << model.vertexCount << " vertices, " << model.indexCount << " indices\n";
 
@@ -279,7 +290,7 @@ int main() {
     glAttachShader(axesProgram, axesFrag);
     glLinkProgram(axesProgram);
 
-    // Axes vertices: 4 axes, each 2 points (origin + direction), each vertex: x,y,z,w,r,g,b
+    // Axes vertices
     float axesVertices[] = {
         // X axis red
         0,0,0,0, 1,0,0,
@@ -314,16 +325,14 @@ int main() {
     glLinkProgram(textProgram);
 
     // Text: control hints
-    const char* hintText = "Controls: WASD-move XY, QE-move Z, ZX-move W, 1234567890-=-rotate planes";
+    const char* hintText = "WASD:move XY | QE:move Z | ZX:move W | 1234:XY,XZ,XW,YZ | 5678:YW,ZW | 90-=:more";
     char textBuffer[20000];
     int numQuads = stb_easy_font_print(10, 1880, (char*)hintText, NULL, textBuffer, sizeof(textBuffer));
     // Convert pixel coordinates to NDC
     for (int i = 0; i < numQuads * 4; i++) {
         float* v = (float*)(textBuffer + i * 16);
-        float x = v[0];
-        float y = v[1];
-        v[0] = (x / 1920.0f) * 2.0f - 1.0f;
-        v[1] = 1.0f - (y / 1920.0f) * 2.0f; // flip Y
+        v[0] = (v[0] / 1920.0f) * 2.0f - 1.0f;
+        v[1] = 1.0f - (v[1] / 1920.0f) * 2.0f;
     }
 
     unsigned int textVBO, textVAO;
@@ -332,7 +341,6 @@ int main() {
     glBindVertexArray(textVAO);
     glBindBuffer(GL_ARRAY_BUFFER, textVBO);
     glBufferData(GL_ARRAY_BUFFER, numQuads * 64, textBuffer, GL_STATIC_DRAW);
-    // Text vertex format: float x, float y, float z, unsigned char color[4]
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 16, (void*)0);
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(1, 4, GL_UNSIGNED_BYTE, GL_TRUE, 16, (void*)12);
@@ -345,29 +353,120 @@ int main() {
     float transX = 0.0f, transY = 0.0f, transZ = 0.0f, transW = 0.0f;
 
     while (!glfwWindowShouldClose(window)) {
-        // Input handling
-        if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) transX += 0.02f;
-        if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) transX -= 0.02f;
-        if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) transY += 0.02f;
-        if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) transY -= 0.02f;
-        if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS) transZ += 0.02f;
-        if (glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS) transZ -= 0.02f;
-        if (glfwGetKey(window, GLFW_KEY_Z) == GLFW_PRESS) transW += 0.02f;
-        if (glfwGetKey(window, GLFW_KEY_X) == GLFW_PRESS) transW -= 0.02f;
+        glfwPollEvents();
 
-        if (glfwGetKey(window, GLFW_KEY_1) == GLFW_PRESS) angleXY += 0.02f;
-        if (glfwGetKey(window, GLFW_KEY_2) == GLFW_PRESS) angleXY -= 0.02f;
-        if (glfwGetKey(window, GLFW_KEY_3) == GLFW_PRESS) angleXZ += 0.02f;
-        if (glfwGetKey(window, GLFW_KEY_4) == GLFW_PRESS) angleXZ -= 0.02f;
-        if (glfwGetKey(window, GLFW_KEY_5) == GLFW_PRESS) angleXW += 0.02f;
-        if (glfwGetKey(window, GLFW_KEY_6) == GLFW_PRESS) angleXW -= 0.02f;
-        if (glfwGetKey(window, GLFW_KEY_7) == GLFW_PRESS) angleYZ += 0.02f;
-        if (glfwGetKey(window, GLFW_KEY_8) == GLFW_PRESS) angleYZ -= 0.02f;
-        if (glfwGetKey(window, GLFW_KEY_9) == GLFW_PRESS) angleYW += 0.02f;
-        if (glfwGetKey(window, GLFW_KEY_0) == GLFW_PRESS) angleYW -= 0.02f;
-        if (glfwGetKey(window, GLFW_KEY_MINUS) == GLFW_PRESS) angleZW += 0.02f;
-        if (glfwGetKey(window, GLFW_KEY_EQUAL) == GLFW_PRESS) angleZW -= 0.02f;
+        // Start ImGui frame
+        ImGui_ImplOpenGL3_NewFrame();
+        ImGui_ImplGlfw_NewFrame();
+        ImGui::NewFrame();
 
+        // Input handling (non-ImGui)
+        if (!ImGui::GetIO().WantCaptureKeyboard) {
+            if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) transX += 0.02f;
+            if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) transX -= 0.02f;
+            if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) transY += 0.02f;
+            if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) transY -= 0.02f;
+            if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS) transZ += 0.02f;
+            if (glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS) transZ -= 0.02f;
+            if (glfwGetKey(window, GLFW_KEY_Z) == GLFW_PRESS) transW += 0.02f;
+            if (glfwGetKey(window, GLFW_KEY_X) == GLFW_PRESS) transW -= 0.02f;
+
+            if (glfwGetKey(window, GLFW_KEY_1) == GLFW_PRESS) angleXY += 0.02f;
+            if (glfwGetKey(window, GLFW_KEY_2) == GLFW_PRESS) angleXY -= 0.02f;
+            if (glfwGetKey(window, GLFW_KEY_3) == GLFW_PRESS) angleXZ += 0.02f;
+            if (glfwGetKey(window, GLFW_KEY_4) == GLFW_PRESS) angleXZ -= 0.02f;
+            if (glfwGetKey(window, GLFW_KEY_5) == GLFW_PRESS) angleXW += 0.02f;
+            if (glfwGetKey(window, GLFW_KEY_6) == GLFW_PRESS) angleXW -= 0.02f;
+            if (glfwGetKey(window, GLFW_KEY_7) == GLFW_PRESS) angleYZ += 0.02f;
+            if (glfwGetKey(window, GLFW_KEY_8) == GLFW_PRESS) angleYZ -= 0.02f;
+            if (glfwGetKey(window, GLFW_KEY_9) == GLFW_PRESS) angleYW += 0.02f;
+            if (glfwGetKey(window, GLFW_KEY_0) == GLFW_PRESS) angleYW -= 0.02f;
+            if (glfwGetKey(window, GLFW_KEY_MINUS) == GLFW_PRESS) angleZW += 0.02f;
+            if (glfwGetKey(window, GLFW_KEY_EQUAL) == GLFW_PRESS) angleZW -= 0.02f;
+        }
+
+        // ImGui window - Controls & Gizmo
+        ImGui::SetNextWindowSize(ImVec2(GUI_DEFAULT_WIDTH, GUI_DEFAULT_HEIGHT), ImGuiCond_FirstUseEver);
+        ImGui::Begin("4D Controls");
+        // Scale font to fit window width (preserve aspect ratio)
+        float scaleX = ImGui::GetWindowSize().x / GUI_DEFAULT_WIDTH;
+        float scaleY = ImGui::GetWindowSize().y / GUI_DEFAULT_HEIGHT;
+        ImGui::SetWindowFontScale(scaleY < scaleX ? scaleY : scaleX);
+
+        if (ImGui::CollapsingHeader("Movement")) {
+            ImGui::Text("WASD: Move in XY plane");
+            ImGui::Text("Q/E: Move Z axis");
+            ImGui::Text("Z/X: Move W axis");
+        }
+
+        if (ImGui::CollapsingHeader("Rotation")) {
+            ImGui::Text("1/2: Rotate XY plane");
+            ImGui::Text("3/4: Rotate XZ plane");
+            ImGui::Text("5/6: Rotate XW plane");
+            ImGui::Text("7/8: Rotate YZ plane");
+            ImGui::Text("9/0: Rotate YW plane");
+            ImGui::Text("-/=: Rotate ZW plane");
+        }
+
+        if (ImGui::CollapsingHeader("Align to Axis (Gizmo)")) {
+            ImGui::Text("Reset rotations to view along axis:");
+
+            if (ImGui::Button("View X+")) {
+                angleXY = 0; angleXZ = 0; angleXW = 0;
+                angleYZ = 0; angleYW = 0; angleZW = 0;
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("View X-")) {
+                angleXY = 3.14159f; angleXZ = 0; angleXW = 0;
+                angleYZ = 0; angleYW = 0; angleZW = 0;
+            }
+
+            if (ImGui::Button("View Y+")) {
+                angleXY = 1.5708f; angleXZ = 0; angleXW = 0;
+                angleYZ = 0; angleYW = 0; angleZW = 0;
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("View Y-")) {
+                angleXY = -1.5708f; angleXZ = 0; angleXW = 0;
+                angleYZ = 0; angleYW = 0; angleZW = 0;
+            }
+
+            if (ImGui::Button("View Z+")) {
+                angleXY = 0; angleXZ = 1.5708f; angleXW = 0;
+                angleYZ = 0; angleYW = 0; angleZW = 0;
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("View Z-")) {
+                angleXY = 0; angleXZ = -1.5708f; angleXW = 0;
+                angleYZ = 0; angleYW = 0; angleZW = 0;
+            }
+
+            if (ImGui::Button("View W+")) {
+                angleXY = 0; angleXZ = 0; angleXW = 1.5708f;
+                angleYZ = 0; angleYW = 0; angleZW = 0;
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("View W-")) {
+                angleXY = 0; angleXZ = 0; angleXW = -1.5708f;
+                angleYZ = 0; angleYW = 0; angleZW = 0;
+            }
+        }
+
+        if (ImGui::CollapsingHeader("Current State")) {
+            ImGui::Text("Translation: %.2f, %.2f, %.2f, %.2f", transX, transY, transZ, transW);
+            ImGui::Text("Rotations: XY=%.2f XZ=%.2f XW=%.2f", angleXY, angleXZ, angleXW);
+            ImGui::Text("          YZ=%.2f YW=%.2f ZW=%.2f", angleYZ, angleYW, angleZW);
+
+            if (ImGui::Button("Reset All")) {
+                transX = transY = transZ = transW = 0;
+                angleXY = angleXZ = angleXW = 0;
+                angleYZ = angleYW = angleZW = 0;
+            }
+        }
+
+        ImGui::End();
+
+        // Rendering
         glClearColor(0.05f, 0.05f, 0.1f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
 
@@ -400,9 +499,17 @@ int main() {
         glBindVertexArray(textVAO);
         glDrawArrays(GL_QUADS, 0, numQuads * 4);
 
+        // Render ImGui
+        ImGui::Render();
+        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+
         glfwSwapBuffers(window);
-        glfwPollEvents();
     }
+
+    // Cleanup
+    ImGui_ImplOpenGL3_Shutdown();
+    ImGui_ImplGlfw_Shutdown();
+    ImGui::DestroyContext();
 
     return 0;
 }
