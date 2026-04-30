@@ -73,10 +73,9 @@ void main() {
 
     float dist3d = 3.0;
     float zDepth = dist3d - p3.z;
-    float scale3d = clamp(dist3d / max(zDepth, 0.1), 0.1, 10.0);
-    vec2 p2 = p3.xy * scale3d;
+    float perspDiv = max(zDepth, 1.0);
 
-    gl_Position = vec4(p2, 0.0, 1.0);
+    gl_Position = vec4(p3.xy * dist3d, p3.z * dist3d, perspDiv);
     vTexCoord = aTexCoord;
 }
 )";
@@ -146,10 +145,9 @@ void main() {
 
     float dist3d = 3.0;
     float zDepth = dist3d - p3.z;
-    float scale3d = clamp(dist3d / max(zDepth, 0.1), 0.1, 10.0);
-    vec2 p2 = p3.xy * scale3d;
+    float perspDiv = max(zDepth, 1.0);
 
-    gl_Position = vec4(p2, 0.0, 1.0);
+    gl_Position = vec4(p3.xy * dist3d, p3.z * dist3d, perspDiv);
     vColor = aColor;
 }
 )";
@@ -218,6 +216,7 @@ int main() {
     }
 
     glViewport(0, 0, 1920, 1920);
+    glEnable(GL_DEPTH_TEST);
 
     Model model = LoadModel("model.dky");
     std::cout << "Loaded " << model.vertexCount << " vertices, " << model.indexCount << " indices\n";
@@ -369,7 +368,7 @@ int main() {
         if (glfwGetKey(window, GLFW_KEY_EQUAL) == GLFW_PRESS) angleZW -= 0.02f;
 
         glClearColor(0.05f, 0.05f, 0.1f, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
         // Draw tesseract
         glUseProgram(shaderProgram);
