@@ -1,3 +1,5 @@
+was made with open code and github copilot(chatgpt 5.1 and Claude haiku)
+
 ducky: 4d vectors -> quad-vect -> qua-vec -> qua-ec-> quack -> duck -> ducky
 
 command used to compile:
