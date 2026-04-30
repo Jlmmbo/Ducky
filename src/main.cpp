@@ -4,16 +4,13 @@
 #include <cmath>
 #include <cstring>
 
-#define GUI_DEFAULT_WIDTH  5.0f
+#define GUI_DEFAULT_WIDTH  350.0f
 #define GUI_DEFAULT_HEIGHT 500.0f
 
 #include "main.hpp"
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
-
-#define STB_EASY_FONT_IMPLEMENTATION
-#include "stb_easy_font.h"
 
 // ImGui includes
 #include "imgui.h"
@@ -164,27 +161,6 @@ void main() {
 }
 )";
 
-// Text shaders (2D screen-space)
-const char* textVertexSrc = R"(
-#version 330 core
-layout(location = 0) in vec2 aPos;
-layout(location = 1) in vec4 aColor;
-out vec4 vColor;
-void main() {
-    gl_Position = vec4(aPos, 0.0, 1.0);
-    vColor = aColor;
-}
-)";
-
-const char* textFragmentSrc = R"(
-#version 330 core
-in vec4 vColor;
-out vec4 FragColor;
-void main() {
-    FragColor = vColor;
-}
-)";
-
 static unsigned int compileShader(unsigned int type, const char* src) {
     unsigned int shader = glCreateShader(type);
     glShaderSource(shader, 1, &src, NULL);
@@ -316,36 +292,6 @@ int main() {
     glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 7 * sizeof(float), (void*)(4 * sizeof(float)));
     glEnableVertexAttribArray(1);
 
-    // Text shader
-    unsigned int textVert = compileShader(GL_VERTEX_SHADER, textVertexSrc);
-    unsigned int textFrag = compileShader(GL_FRAGMENT_SHADER, textFragmentSrc);
-    unsigned int textProgram = glCreateProgram();
-    glAttachShader(textProgram, textVert);
-    glAttachShader(textProgram, textFrag);
-    glLinkProgram(textProgram);
-
-    // Text: control hints
-    const char* hintText = "WASD:move XY | QE:move Z | ZX:move W | 1234:XY,XZ,XW,YZ | 5678:YW,ZW | 90-=:more";
-    char textBuffer[20000];
-    int numQuads = stb_easy_font_print(10, 1880, (char*)hintText, NULL, textBuffer, sizeof(textBuffer));
-    // Convert pixel coordinates to NDC
-    for (int i = 0; i < numQuads * 4; i++) {
-        float* v = (float*)(textBuffer + i * 16);
-        v[0] = (v[0] / 1920.0f) * 2.0f - 1.0f;
-        v[1] = 1.0f - (v[1] / 1920.0f) * 2.0f;
-    }
-
-    unsigned int textVBO, textVAO;
-    glGenVertexArrays(1, &textVAO);
-    glGenBuffers(1, &textVBO);
-    glBindVertexArray(textVAO);
-    glBindBuffer(GL_ARRAY_BUFFER, textVBO);
-    glBufferData(GL_ARRAY_BUFFER, numQuads * 64, textBuffer, GL_STATIC_DRAW);
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 16, (void*)0);
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(1, 4, GL_UNSIGNED_BYTE, GL_TRUE, 16, (void*)12);
-    glEnableVertexAttribArray(1);
-
     glUseProgram(shaderProgram);
 
     float angleXY = 0.0f, angleXZ = 0.0f, angleXW = 0.0f;
@@ -386,12 +332,76 @@ int main() {
         }
 
         // ImGui window - Controls & Gizmo
-        ImGui::SetNextWindowSize(ImVec2(GUI_DEFAULT_WIDTH, GUI_DEFAULT_HEIGHT), ImGuiCond_FirstUseEver);
+        static float userFontScale = 1.0f;
+        static bool fontScaleInitialized = false;
+        static bool initialSizeSet = false;
+        float targetWidth = GUI_DEFAULT_WIDTH * userFontScale;
+        float targetHeight = GUI_DEFAULT_HEIGHT * userFontScale;
+        if (!initialSizeSet) {
+            ImGui::SetNextWindowSize(ImVec2(targetWidth, targetHeight), ImGuiCond_Once);
+            initialSizeSet = true;
+        }
         ImGui::Begin("4D Controls");
-        // Scale font to fit window width (preserve aspect ratio)
-        float scaleX = ImGui::GetWindowSize().x / GUI_DEFAULT_WIDTH;
-        float scaleY = ImGui::GetWindowSize().y / GUI_DEFAULT_HEIGHT;
-        ImGui::SetWindowFontScale(scaleY < scaleX ? scaleY : scaleX);
+        if (!fontScaleInitialized) {
+            ImGuiStyle& style = ImGui::GetStyle();
+            float availWidth = ImGui::GetWindowSize().x - style.WindowPadding.x * 2;
+            float availHeight = ImGui::GetWindowSize().y - ImGui::GetFrameHeightWithSpacing() - style.WindowPadding.y * 2;
+            const char* lines[] = {
+                "WASD: Move in XY plane", "Q/E: Move Z axis", "Z/X: Move W axis",
+                "1/2: Rotate XY plane", "3/4: Rotate XZ plane", "5/6: Rotate XW plane",
+                "7/8: Rotate YZ plane", "9/0: Rotate YW plane", "-/=: Rotate ZW plane",
+                "View X+", "View X-", "View Y+", "View Y-", "View Z+", "View Z-", "View W+", "View W-",
+                "Translation:", "Rotations:", "Reset All"
+            };
+            int numLines = sizeof(lines) / sizeof(lines[0]);
+            float maxTextWidth = 0;
+            float totalTextHeight = 0;
+            for (int i = 0; i < numLines; i++) {
+                ImVec2 size = ImGui::CalcTextSize(lines[i]);
+                if (size.x > maxTextWidth) maxTextWidth = size.x;
+                totalTextHeight += size.y + style.ItemSpacing.y;
+            }
+            totalTextHeight += style.ItemSpacing.y * 12;
+            float scaleX = availWidth / (maxTextWidth * 1.05f);
+            float scaleY = availHeight / (totalTextHeight * 1.02f);
+            float scale = (scaleX < scaleY) ? scaleX : scaleY;
+            if (scale <= 0) scale = 1.0f;
+            userFontScale = scale;
+            fontScaleInitialized = true;
+        }
+        ImGui::SetWindowFontScale(userFontScale);
+
+        if (ImGui::CollapsingHeader("Settings")) {
+            ImGui::Text("Font Scale:");
+            ImGui::SameLine();
+            ImGui::SliderFloat("##fontScale", &userFontScale, 0.5f, 3.0f);
+            if (ImGui::Button("Reset Font Scale")) {
+                ImGuiStyle& style = ImGui::GetStyle();
+                float availWidth = ImGui::GetWindowSize().x - style.WindowPadding.x * 2;
+                float availHeight = ImGui::GetWindowSize().y - ImGui::GetFrameHeightWithSpacing() - style.WindowPadding.y * 2;
+                const char* lines[] = {
+                    "WASD: Move in XY plane", "Q/E: Move Z axis", "Z/X: Move W axis",
+                    "1/2: Rotate XY plane", "3/4: Rotate XZ plane", "5/6: Rotate XW plane",
+                    "7/8: Rotate YZ plane", "9/0: Rotate YW plane", "-/=: Rotate ZW plane",
+                    "View X+", "View X-", "View Y+", "View Y-", "View Z+", "View Z-", "View W+", "View W-",
+                    "Translation:", "Rotations:", "Reset All"
+                };
+                int numLines = sizeof(lines) / sizeof(lines[0]);
+                float maxTextWidth = 0;
+                float totalTextHeight = 0;
+                for (int i = 0; i < numLines; i++) {
+                    ImVec2 size = ImGui::CalcTextSize(lines[i]);
+                    if (size.x > maxTextWidth) maxTextWidth = size.x;
+                    totalTextHeight += size.y + style.ItemSpacing.y;
+                }
+                totalTextHeight += style.ItemSpacing.y * 12;
+                float scaleX = availWidth / (maxTextWidth * 1.05f);
+                float scaleY = availHeight / (totalTextHeight * 1.02f);
+                float scale = (scaleX < scaleY) ? scaleX : scaleY;
+                if (scale <= 0) scale = 1.0f;
+                userFontScale = scale;
+            }
+        }
 
         if (ImGui::CollapsingHeader("Movement")) {
             ImGui::Text("WASD: Move in XY plane");
@@ -493,11 +503,6 @@ int main() {
         glUniform1f(glGetUniformLocation(axesProgram, "angleZW"), angleZW);
         glBindVertexArray(axesVAO);
         glDrawArrays(GL_LINES, 0, 8);
-
-        // Draw text
-        glUseProgram(textProgram);
-        glBindVertexArray(textVAO);
-        glDrawArrays(GL_QUADS, 0, numQuads * 4);
 
         // Render ImGui
         ImGui::Render();
