@@ -1,0 +1,41 @@
+cmake_minimum_required(VERSION 3.16)
+project(Ducky VERSION 1.0 LANGUAGES C CXX)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+include_directories(${CMAKE_SOURCE_DIR}/include ${CMAKE_SOURCE_DIR}/src)
+
+if(CMAKE_CROSSCOMPILING OR CMAKE_SYSTEM_NAME MATCHES "Windows")
+    include(FetchContent)
+    FetchContent_Declare(
+        glfw
+        URL https://github.com/glfw/glfw/releases/download/3.4/glfw-3.4.zip
+    )
+    FetchContent_MakeAvailable(glfw)
+    add_executable(ducky WIN32 src/main.cpp src/glad.c)
+    target_include_directories(ducky PRIVATE ${glfw_SOURCE_DIR}/include)
+    target_link_libraries(ducky glfw opengl32 gdi32 user32 shell32)
+    if(EXISTS ${CMAKE_SOURCE_DIR}/bin/glfw3.dll)
+        file(COPY ${CMAKE_SOURCE_DIR}/bin/glfw3.dll DESTINATION ${CMAKE_BINARY_DIR})
+        file(COPY ${CMAKE_SOURCE_DIR}/bin/SDL3.dll DESTINATION ${CMAKE_BINARY_DIR})
+        file(COPY ${CMAKE_SOURCE_DIR}/bin/libgcc_s_seh-1.dll DESTINATION ${CMAKE_BINARY_DIR})
+        file(COPY ${CMAKE_SOURCE_DIR}/bin/libstdc++-6.dll DESTINATION ${CMAKE_BINARY_DIR})
+        file(COPY ${CMAKE_SOURCE_DIR}/bin/libwinpthread-1.dll DESTINATION ${CMAKE_BINARY_DIR})
+    endif()
+else()
+    find_package(OpenGL REQUIRED)
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(GLFW REQUIRED glfw3)
+    add_executable(ducky src/main.cpp)
+target_sources(ducky PRIVATE src/glad.c)
+    target_include_directories(ducky PRIVATE ${GLFW_INCLUDE_DIRS})
+    target_link_libraries(ducky ${OPENGL_LIBRARIES} ${GLFW_LIBRARIES})
+endif()
+
+if(EXISTS ${CMAKE_SOURCE_DIR}/model.dky)
+    file(COPY ${CMAKE_SOURCE_DIR}/model.dky DESTINATION ${CMAKE_BINARY_DIR})
+endif()
+if(EXISTS ${CMAKE_SOURCE_DIR}/00001.png)
+    file(COPY ${CMAKE_SOURCE_DIR}/00001.png DESTINATION ${CMAKE_BINARY_DIR})
+endif()
