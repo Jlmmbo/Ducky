@@ -240,13 +240,21 @@ int main() {
     glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)(4 * sizeof(float)));
     glEnableVertexAttribArray(1);
 
-    // Tesseract shader
-    unsigned int vertshader = compileShader(GL_VERTEX_SHADER, vertexShaderSrc);
-    unsigned int fragshader = compileShader(GL_FRAGMENT_SHADER, fragmentShaderSrc);
-    unsigned int shaderProgram = glCreateProgram();
-    glAttachShader(shaderProgram, vertshader);
-    glAttachShader(shaderProgram, fragshader);
-    glLinkProgram(shaderProgram);
+    GLuint tessProgram = createShaderProgram("shaders/tesseract.vert", "shaders/tesseract.frag");
+    if (!tessProgram) {
+        glfwTerminate();
+        return -1;
+    }
+
+    TesseractUniforms tessUni;
+    tessUni.angleXY = glGetUniformLocation(tessProgram, "angleXY");
+    tessUni.angleXZ = glGetUniformLocation(tessProgram, "angleXZ");
+    tessUni.angleXW = glGetUniformLocation(tessProgram, "angleXW");
+    tessUni.angleYZ = glGetUniformLocation(tessProgram, "angleYZ");
+    tessUni.angleYW = glGetUniformLocation(tessProgram, "angleYW");
+    tessUni.angleZW = glGetUniformLocation(tessProgram, "angleZW");
+    tessUni.translation = glGetUniformLocation(tessProgram, "translation");
+    tessUni.uTexture = glGetUniformLocation(tessProgram, "uTexture");
 
     // Texture
     int width, height, channels;

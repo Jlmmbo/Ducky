@@ -1,0 +1,58 @@
+#version 330 core
+layout(location = 0) in vec4 aPos;
+layout(location = 1) in vec3 aColor;
+
+out vec3 vColor;
+
+uniform float angleXY;
+uniform float angleXZ;
+uniform float angleXW;
+uniform float angleYZ;
+uniform float angleYW;
+uniform float angleZW;
+
+const float DIST_4D = 4.0;
+const float DIST_3D = 3.0;
+
+void main() {
+    float x = aPos.x;
+    float y = aPos.y;
+    float z = aPos.z;
+    float w = aPos.w;
+
+    float c, s, nx, ny, nz, nw;
+
+    c = cos(angleXY); s = sin(angleXY);
+    nx = x * c - y * s; ny = x * s + y * c;
+    x = nx; y = ny;
+
+    c = cos(angleXZ); s = sin(angleXZ);
+    nx = x * c - z * s; nz = x * s + z * c;
+    x = nx; z = nz;
+
+    c = cos(angleXW); s = sin(angleXW);
+    nx = x * c - w * s; nw = x * s + w * c;
+    x = nx; w = nw;
+
+    c = cos(angleYZ); s = sin(angleYZ);
+    ny = y * c - z * s; nz = y * s + z * c;
+    y = ny; z = nz;
+
+    c = cos(angleYW); s = sin(angleYW);
+    ny = y * c - w * s; nw = y * s + w * c;
+    y = ny; w = nw;
+
+    c = cos(angleZW); s = sin(angleZW);
+    nz = z * c - w * s; nw = z * s + w * c;
+    z = nz; w = nw;
+
+    float wDepth = DIST_4D - w;
+    float scale4d = clamp(DIST_4D / wDepth, 0.1, 10.0);
+    vec3 p3 = vec3(x, y, z) * scale4d;
+
+    float zDepth = DIST_3D - p3.z;
+    float perspDiv = max(zDepth, 1.0);
+
+    gl_Position = vec4(p3.xy * DIST_3D, p3.z * DIST_3D, perspDiv);
+    vColor = aColor;
+}
