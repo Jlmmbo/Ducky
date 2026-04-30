@@ -197,6 +197,7 @@ static unsigned int compileShader(unsigned int type, const char* src) {
 }
 
 int main() {
+    glfwInitHint(GLFW_WAYLAND_LIBDECOR, GLFW_WAYLAND_DISABLE_LIBDECOR);
     glfwInit();
 
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
