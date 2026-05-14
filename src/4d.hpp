@@ -1,3 +1,5 @@
+#include <cmath>
+
 typedef struct Vecf4{
     float x, y, z, w;
 
@@ -21,6 +23,14 @@ typedef struct Vecf4{
         return {x - other.x, y - other.y, z - other.z, w - other.w};
     }
 }Vecf4;
+
+static inline void rotatePlane(float& a, float& b, float angle) {
+    float c = cosf(angle), s = sinf(angle);
+    float na = a * c - b * s;
+    float nb = a * s + b * c;
+    a = na;
+    b = nb;
+}
 
 Vecf4 rotate4d(Vecf4 position, Vecf4 center, float rotation[6]){
     Vecf4 tmp;

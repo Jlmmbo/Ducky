@@ -51,12 +51,12 @@ void main() {
 
     // Project 4D → 3D with perspective
     float wDepth = DIST_4D - w;
-    float scale4d = clamp(DIST_4D / wDepth, 0.1, 10.0);
+    float scale4d = wDepth > 0.001 ? DIST_4D / wDepth : 10.0;
     vec3 p3 = vec3(x, y, z) * scale4d;
 
     // Project 3D → 2D with perspective
     float zDepth = DIST_3D - p3.z;
-    float perspDiv = max(zDepth, 1.0);
+    float perspDiv = zDepth > 0.001 ? zDepth : 0.001;
 
     gl_Position = vec4(p3.xy * DIST_3D, p3.z * DIST_3D, perspDiv);
     vTexCoord = aTexCoord;

@@ -311,16 +311,20 @@ int main() {
         glBindVertexArray(axesVAO);
         glDrawArrays(GL_LINES, 0, 8);
 
-        // Draw text
+        // Draw text (disable depth test so HUD is always visible)
+        glDisable(GL_DEPTH_TEST);
         glUseProgram(textProgram);
         glBindVertexArray(textVAO);
         glDrawArrays(GL_QUADS, 0, numQuads * 4);
+        glEnable(GL_DEPTH_TEST);
 
         glfwSwapBuffers(window);
         glfwPollEvents();
     }
 
     // Cleanup
+    delete[] model.vertices;
+    delete[] model.indices;
     glDeleteVertexArrays(1, &tessVAO);
     glDeleteBuffers(1, &tessVBO);
     glDeleteBuffers(1, &tessEBO);

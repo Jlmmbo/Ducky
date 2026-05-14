@@ -1,4 +1,5 @@
 #include <cstring>
+#include <iostream>
 
 struct Model {
     float* vertices;           // x, y, z, w, u, v per vertex

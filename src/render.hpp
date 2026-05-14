@@ -1,3 +1,5 @@
+#include <vector>
+
 typedef struct Vertex{
     Vecf4 pos;
     char* texture_name;
@@ -8,21 +10,20 @@ Vecf2 interpol(Vecf2 a, Vecf2 b, float x){
 }
 
 void renderPoly(Vertex* verts, int n, Camera camera, char* texture_name = NULL){
-    Vecf2 screenVerts[n];
+    std::vector<Vecf2> screenVerts(n);
 
-    // get screen positions of vertices
     for(int i = 0; i < n; i++){
         Vecf2 screen_pos = project(verts[i].pos, camera);
         screenVerts[i] = screen_pos;
     }
 
-    // render the polygon with texture interpolated across the surface
     for(int i = 0; i < n; i++){
         Vecf2 a = screenVerts[i];
         Vecf2 b = screenVerts[(i + 1) % n];
-        for(float x = 0; x < 1; x += 0.01){
-            Vecf2 point = interpol(a, b, x);
-            
+        for(int step = 0; step < 100; step++){
+            float t = step / 100.0f;
+            Vecf2 point = interpol(a, b, t);
+            (void)point;
         }
-
+    }
 }
