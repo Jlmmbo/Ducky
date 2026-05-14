@@ -153,6 +153,38 @@ int main() {
     Model model = LoadModel("model.dky");
     std::cout << "Loaded " << model.vertexCount << " vertices, " << model.indexCount << " indices" << std::endl;
 
+    // Generate tesseract wireframe edges (32 edges of the hypercube)
+    const int NUM_EDGE_VERTS = 16;
+    float edgeVerts[NUM_EDGE_VERTS][4];
+    int vi = 0;
+    for (int i = 0; i < 2; i++)
+        for (int j = 0; j < 2; j++)
+            for (int k = 0; k < 2; k++)
+                for (int l = 0; l < 2; l++) {
+                    edgeVerts[vi][0] = i ? 0.5f : -0.5f;
+                    edgeVerts[vi][1] = j ? 0.5f : -0.5f;
+                    edgeVerts[vi][2] = k ? 0.5f : -0.5f;
+                    edgeVerts[vi][3] = l ? 0.5f : -0.5f;
+                    vi++;
+                }
+
+    int edgeList[32][2];
+    int ec = 0;
+    for (int a = 0; a < NUM_EDGE_VERTS; a++)
+        for (int b = a + 1; b < NUM_EDGE_VERTS; b++) {
+            int diff = 0;
+            for (int c = 0; c < 4; c++)
+                if (edgeVerts[a][c] != edgeVerts[b][c]) diff++;
+            if (diff == 1) { edgeList[ec][0] = a; edgeList[ec][1] = b; ec++; }
+        }
+
+    float edgeVertexData[32 * 2 * 4];
+    for (int i = 0; i < 32; i++)
+        for (int c = 0; c < 4; c++) {
+            edgeVertexData[i * 8 + c] = edgeVerts[edgeList[i][0]][c];
+            edgeVertexData[i * 8 + 4 + c] = edgeVerts[edgeList[i][1]][c];
+        }
+
     // === Tesseract setup ===
     GLuint tessVAO, tessVBO, tessEBO;
     glGenVertexArrays(1, &tessVAO);
@@ -255,6 +287,30 @@ int main() {
     axesUni.angleYW = glGetUniformLocation(axesProgram, "angleYW");
     axesUni.angleZW = glGetUniformLocation(axesProgram, "angleZW");
 
+    // === Wireframe edges setup ===
+    GLuint edgeVAO, edgeVBO;
+    glGenVertexArrays(1, &edgeVAO);
+    glGenBuffers(1, &edgeVBO);
+    glBindVertexArray(edgeVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, edgeVBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(edgeVertexData), edgeVertexData, GL_STATIC_DRAW);
+    glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 4 * sizeof(float), nullptr);
+    glEnableVertexAttribArray(0);
+
+    GLuint edgeProgram = createShaderProgram("shaders/edge.vert", "shaders/edge.frag");
+    if (!edgeProgram) { glfwTerminate(); return -1; }
+
+    struct EdgeUniforms {
+        GLuint angleXY, angleXZ, angleXW, angleYZ, angleYW, angleZW, translation;
+    } edgeUni;
+    edgeUni.angleXY = glGetUniformLocation(edgeProgram, "angleXY");
+    edgeUni.angleXZ = glGetUniformLocation(edgeProgram, "angleXZ");
+    edgeUni.angleXW = glGetUniformLocation(edgeProgram, "angleXW");
+    edgeUni.angleYZ = glGetUniformLocation(edgeProgram, "angleYZ");
+    edgeUni.angleYW = glGetUniformLocation(edgeProgram, "angleYW");
+    edgeUni.angleZW = glGetUniformLocation(edgeProgram, "angleZW");
+    edgeUni.translation = glGetUniformLocation(edgeProgram, "translation");
+
     // === Text setup ===
     GLuint textProgram = createShaderProgram("shaders/text.vert", "shaders/text.frag");
     if (!textProgram) {
@@ -264,13 +320,7 @@ int main() {
 
     const char* hintText = "Controls: WASD-move XY, QE-move Z, ZX-move W, 1234567890-=-rotate planes";
     char textBuffer[20000];
-    int numQuads = stb_easy_font_print(10, WINDOW_HEIGHT - 40, (char*)hintText, nullptr, textBuffer, sizeof(textBuffer));
-
-    for (int i = 0; i < numQuads * 4; i++) {
-        float* v = (float*)(textBuffer + i * 16);
-        v[0] = (v[0] / WINDOW_WIDTH) * 2.0f - 1.0f;
-        v[1] = 1.0f - (v[1] / WINDOW_HEIGHT) * 2.0f;
-    }
+    int numQuads = stb_easy_font_print(10, 10, (char*)hintText, nullptr, textBuffer, sizeof(textBuffer));
 
     GLuint textVAO, textVBO;
     glGenVertexArrays(1, &textVAO);
@@ -282,6 +332,7 @@ int main() {
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(1, 4, GL_UNSIGNED_BYTE, GL_TRUE, 16, (void*)12);
     glEnableVertexAttribArray(1);
+    GLint textScreenSize = glGetUniformLocation(textProgram, "uScreenSize");
 
     Transform4D transform;
 
@@ -314,9 +365,24 @@ int main() {
         glBindVertexArray(axesVAO);
         glDrawArrays(GL_LINES, 0, 8);
 
+        // Draw white wireframe edges (on top, no depth test)
+        glDisable(GL_DEPTH_TEST);
+        glUseProgram(edgeProgram);
+        glUniform1f(edgeUni.angleXY, transform.angleXY);
+        glUniform1f(edgeUni.angleXZ, transform.angleXZ);
+        glUniform1f(edgeUni.angleXW, transform.angleXW);
+        glUniform1f(edgeUni.angleYZ, transform.angleYZ);
+        glUniform1f(edgeUni.angleYW, transform.angleYW);
+        glUniform1f(edgeUni.angleZW, transform.angleZW);
+        glUniform4f(edgeUni.translation, transform.transX, transform.transY, transform.transZ, transform.transW);
+        glBindVertexArray(edgeVAO);
+        glDrawArrays(GL_LINES, 0, 64);
+        glEnable(GL_DEPTH_TEST);
+
         // Draw text (disable depth test so HUD is always visible)
         glDisable(GL_DEPTH_TEST);
         glUseProgram(textProgram);
+        glUniform2f(textScreenSize, WINDOW_WIDTH, WINDOW_HEIGHT);
         glBindVertexArray(textVAO);
         glDrawArrays(GL_QUADS, 0, numQuads * 4);
         glEnable(GL_DEPTH_TEST);
@@ -333,6 +399,9 @@ int main() {
     glDeleteBuffers(1, &tessEBO);
     glDeleteVertexArrays(1, &axesVAO);
     glDeleteBuffers(1, &axesVBO);
+    glDeleteVertexArrays(1, &edgeVAO);
+    glDeleteBuffers(1, &edgeVBO);
+    glDeleteProgram(edgeProgram);
     glDeleteVertexArrays(1, &textVAO);
     glDeleteBuffers(1, &textVBO);
     glDeleteProgram(tessProgram);
