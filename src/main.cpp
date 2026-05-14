@@ -124,8 +124,8 @@ static void processInput(GLFWwindow* window, Transform4D& t) {
 }
 
 int main() {
-    // Init GLFW (disable libdecor for Wayland compatibility)
-    glfwInitHint(GLFW_WAYLAND_LIBDECOR, GLFW_WAYLAND_DISABLE_LIBDECOR);
+    // Force X11 for proper window decorations everywhere (including XWayland on Wayland)
+    glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
     if (!glfwInit()) {
         std::cerr << "Failed to initialize GLFW" << std::endl;
         return -1;
