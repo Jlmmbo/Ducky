@@ -2,7 +2,7 @@
 #include <iostream>
 
 struct Model {
-    float* vertices;           // x, y, z, w, u, v per vertex
+    float* vertices;           // x, y, z, w, u, v, wt per vertex
     unsigned int vertexCount;
     unsigned int* indices;      // face indices
     unsigned int indexCount;
@@ -30,21 +30,22 @@ Model LoadModel(const char* path) {
         }
 
         if (section == 0) {
-            float x, y, z, w, u, v;
-            if (sscanf(line, "%f %f %f %f %f %f", &x, &y, &z, &w, &u, &v) == 6) {
-                float* newverts = new float[(model.vertexCount + 1) * 6];
+            float x, y, z, w, u, v, wt;
+            if (sscanf(line, "%f %f %f %f %f %f %f", &x, &y, &z, &w, &u, &v, &wt) == 7) {
+                float* newverts = new float[(model.vertexCount + 1) * 7];
                 if (model.vertices) {
-                    memcpy(newverts, model.vertices, model.vertexCount * 6 * sizeof(float));
+                    memcpy(newverts, model.vertices, model.vertexCount * 7 * sizeof(float));
                     delete[] model.vertices;
                 }
                 model.vertices = newverts;
-                int offset = model.vertexCount * 6;
+                int offset = model.vertexCount * 7;
                 model.vertices[offset] = x;
                 model.vertices[offset + 1] = y;
                 model.vertices[offset + 2] = z;
                 model.vertices[offset + 3] = w;
                 model.vertices[offset + 4] = u;
                 model.vertices[offset + 5] = v;
+                model.vertices[offset + 6] = wt;
                 model.vertexCount++;
             }
         } else if (section == 1) {

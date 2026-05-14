@@ -1,8 +1,8 @@
 #version 330 core
 layout(location = 0) in vec4 aPos;
-layout(location = 1) in vec2 aTexCoord;
+layout(location = 1) in vec3 aTexCoord;
 
-out vec2 vTexCoord;
+out vec3 vTexCoord;
 
 uniform float angleXY;
 uniform float angleXZ;
@@ -59,5 +59,5 @@ void main() {
     float perspDiv = zDepth > 0.001 ? zDepth : 0.001;
 
     gl_Position = vec4(p3.xy * DIST_3D, p3.z * DIST_3D, perspDiv);
-    vTexCoord = aTexCoord;
+    vTexCoord = vec3(x, y, z) + 0.5;
 }

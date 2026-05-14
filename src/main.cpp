@@ -6,9 +6,6 @@
 
 #include "main.hpp"
 
-#define STB_IMAGE_IMPLEMENTATION
-#include "stb_image.h"
-
 #define STB_EASY_FONT_IMPLEMENTATION
 #include "stb_easy_font.h"
 
@@ -164,13 +161,13 @@ int main() {
 
     glBindVertexArray(tessVAO);
     glBindBuffer(GL_ARRAY_BUFFER, tessVBO);
-    glBufferData(GL_ARRAY_BUFFER, model.vertexCount * 6 * sizeof(float), model.vertices, GL_STATIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, model.vertexCount * 7 * sizeof(float), model.vertices, GL_STATIC_DRAW);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, tessEBO);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, model.indexCount * sizeof(unsigned int), model.indices, GL_STATIC_DRAW);
 
-    glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 6 * sizeof(float), nullptr);
+    glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 7 * sizeof(float), nullptr);
     glEnableVertexAttribArray(0);
-    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)(4 * sizeof(float)));
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 7 * sizeof(float), (void*)(4 * sizeof(float)));
     glEnableVertexAttribArray(1);
 
     GLuint tessProgram = createShaderProgram("shaders/tesseract.vert", "shaders/tesseract.frag");
@@ -189,28 +186,34 @@ int main() {
     tessUni.translation = glGetUniformLocation(tessProgram, "translation");
     tessUni.uTexture = glGetUniformLocation(tessProgram, "uTexture");
 
-    // Texture setup
-    int texW, texH, texC;
-    unsigned char* texData = stbi_load("00001.png", &texW, &texH, &texC, 4);
-    if (!texData) {
-        std::cerr << "Failed to load texture" << std::endl;
-        glfwTerminate();
-        return -1;
+    // Generate 3D gradient texture
+    const int TEX_SIZE = 32;
+    unsigned char texData[TEX_SIZE * TEX_SIZE * TEX_SIZE * 4];
+    for (int z = 0; z < TEX_SIZE; z++) {
+        for (int y = 0; y < TEX_SIZE; y++) {
+            for (int x = 0; x < TEX_SIZE; x++) {
+                int idx = (z * TEX_SIZE * TEX_SIZE + y * TEX_SIZE + x) * 4;
+                texData[idx + 0] = (x * 255) / (TEX_SIZE - 1);
+                texData[idx + 1] = (y * 255) / (TEX_SIZE - 1);
+                texData[idx + 2] = (z * 255) / (TEX_SIZE - 1);
+                texData[idx + 3] = 255;
+            }
+        }
     }
 
     GLuint textureID;
     glGenTextures(1, &textureID);
-    glBindTexture(GL_TEXTURE_2D, textureID);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, texW, texH, 0, GL_RGBA, GL_UNSIGNED_BYTE, texData);
-    std::cout << "Texture loaded: " << texW << "x" << texH << " channels=" << texC << std::endl;
-    stbi_image_free(texData);
+    glBindTexture(GL_TEXTURE_3D, textureID);
+    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+    glTexImage3D(GL_TEXTURE_3D, 0, GL_RGBA, TEX_SIZE, TEX_SIZE, TEX_SIZE, 0, GL_RGBA, GL_UNSIGNED_BYTE, texData);
+    std::cout << "Generated 3D texture: " << TEX_SIZE << "x" << TEX_SIZE << "x" << TEX_SIZE << std::endl;
 
     glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, textureID);
+    glBindTexture(GL_TEXTURE_3D, textureID);
     glUseProgram(tessProgram);
     glUniform1i(tessUni.uTexture, 0);
 
