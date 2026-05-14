@@ -8,6 +8,7 @@ uniform float angleYZ;
 uniform float angleYW;
 uniform float angleZW;
 uniform vec4 translation;
+uniform float uAspect;
 
 const float DIST_4D = 4.0;
 const float DIST_3D = 3.0;
@@ -51,5 +52,5 @@ void main() {
     float zDepth = DIST_3D - p3.z;
     float perspDiv = zDepth > 0.001 ? zDepth : 0.001;
 
-    gl_Position = vec4(p3.xy * DIST_3D, p3.z * DIST_3D, perspDiv);
+    gl_Position = vec4(p3.x * DIST_3D / uAspect, p3.y * DIST_3D, p3.z * DIST_3D, perspDiv);
 }

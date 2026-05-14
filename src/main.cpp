@@ -26,11 +26,12 @@ struct Transform4D {
 // Uniform location caches
 struct TesseractUniforms {
     GLuint angleXY, angleXZ, angleXW, angleYZ, angleYW, angleZW;
-    GLuint translation, uTexture;
+    GLuint translation, uTexture, uAspect;
 };
 
 struct AxesUniforms {
     GLuint angleXY, angleXZ, angleXW, angleYZ, angleYW, angleZW;
+    GLuint uAspect;
 };
 
 // Load file to string
@@ -146,7 +147,7 @@ int main() {
         return -1;
     }
 
-    glViewport(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT);
+    int fbW = 0, fbH = 0;
     glEnable(GL_DEPTH_TEST);
 
     // Load model
@@ -217,6 +218,7 @@ int main() {
     tessUni.angleZW = glGetUniformLocation(tessProgram, "angleZW");
     tessUni.translation = glGetUniformLocation(tessProgram, "translation");
     tessUni.uTexture = glGetUniformLocation(tessProgram, "uTexture");
+    tessUni.uAspect = glGetUniformLocation(tessProgram, "uAspect");
 
     // Generate 3D gradient texture
     const int TEX_SIZE = 32;
@@ -286,6 +288,7 @@ int main() {
     axesUni.angleYZ = glGetUniformLocation(axesProgram, "angleYZ");
     axesUni.angleYW = glGetUniformLocation(axesProgram, "angleYW");
     axesUni.angleZW = glGetUniformLocation(axesProgram, "angleZW");
+    axesUni.uAspect = glGetUniformLocation(axesProgram, "uAspect");
 
     // === Wireframe edges setup ===
     GLuint edgeVAO, edgeVBO;
@@ -301,7 +304,7 @@ int main() {
     if (!edgeProgram) { glfwTerminate(); return -1; }
 
     struct EdgeUniforms {
-        GLuint angleXY, angleXZ, angleXW, angleYZ, angleYW, angleZW, translation;
+        GLuint angleXY, angleXZ, angleXW, angleYZ, angleYW, angleZW, translation, uAspect;
     } edgeUni;
     edgeUni.angleXY = glGetUniformLocation(edgeProgram, "angleXY");
     edgeUni.angleXZ = glGetUniformLocation(edgeProgram, "angleXZ");
@@ -310,6 +313,7 @@ int main() {
     edgeUni.angleYW = glGetUniformLocation(edgeProgram, "angleYW");
     edgeUni.angleZW = glGetUniformLocation(edgeProgram, "angleZW");
     edgeUni.translation = glGetUniformLocation(edgeProgram, "translation");
+    edgeUni.uAspect = glGetUniformLocation(edgeProgram, "uAspect");
 
     // === Text setup ===
     GLuint textProgram = createShaderProgram("shaders/text.vert", "shaders/text.frag");
@@ -339,6 +343,12 @@ int main() {
     // Render loop
     while (!glfwWindowShouldClose(window)) {
         processInput(window, transform);
+
+        // Update framebuffer size and aspect ratio
+        glfwGetFramebufferSize(window, &fbW, &fbH);
+        glViewport(0, 0, fbW, fbH);
+        float aspect = (float)fbW / (float)fbH;
+
         glClearColor(0.05f, 0.05f, 0.1f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
@@ -351,6 +361,7 @@ int main() {
         glUniform1f(tessUni.angleYW, transform.angleYW);
         glUniform1f(tessUni.angleZW, transform.angleZW);
         glUniform4f(tessUni.translation, transform.transX, transform.transY, transform.transZ, transform.transW);
+        glUniform1f(tessUni.uAspect, aspect);
         glBindVertexArray(tessVAO);
         glDrawElements(GL_TRIANGLES, model.indexCount, GL_UNSIGNED_INT, nullptr);
 
@@ -362,6 +373,7 @@ int main() {
         glUniform1f(axesUni.angleYZ, transform.angleYZ);
         glUniform1f(axesUni.angleYW, transform.angleYW);
         glUniform1f(axesUni.angleZW, transform.angleZW);
+        glUniform1f(axesUni.uAspect, aspect);
         glBindVertexArray(axesVAO);
         glDrawArrays(GL_LINES, 0, 8);
 
@@ -375,6 +387,7 @@ int main() {
         glUniform1f(edgeUni.angleYW, transform.angleYW);
         glUniform1f(edgeUni.angleZW, transform.angleZW);
         glUniform4f(edgeUni.translation, transform.transX, transform.transY, transform.transZ, transform.transW);
+        glUniform1f(edgeUni.uAspect, aspect);
         glBindVertexArray(edgeVAO);
         glDrawArrays(GL_LINES, 0, 64);
         glEnable(GL_DEPTH_TEST);
@@ -382,7 +395,7 @@ int main() {
         // Draw text (disable depth test so HUD is always visible)
         glDisable(GL_DEPTH_TEST);
         glUseProgram(textProgram);
-        glUniform2f(textScreenSize, WINDOW_WIDTH, WINDOW_HEIGHT);
+        glUniform2f(textScreenSize, fbW, fbH);
         glBindVertexArray(textVAO);
         glDrawArrays(GL_QUADS, 0, numQuads * 4);
         glEnable(GL_DEPTH_TEST);
