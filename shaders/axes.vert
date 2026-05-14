@@ -14,6 +14,8 @@ uniform float uAspect;
 
 const float DIST_4D = 4.0;
 const float DIST_3D = 3.0;
+const float Z_NEAR = 0.1;
+const float Z_FAR = 20.0;
 
 void main() {
     float x = aPos.x;
@@ -54,6 +56,8 @@ void main() {
     float zDepth = DIST_3D - p3.z;
     float perspDiv = zDepth > 0.001 ? zDepth : 0.001;
 
-    gl_Position = vec4(p3.x * DIST_3D / uAspect, p3.y * DIST_3D, p3.z * DIST_3D, perspDiv);
+    float z_eye = p3.z - DIST_3D;
+    float clip_z = z_eye * (Z_FAR + Z_NEAR) / (Z_NEAR - Z_FAR) + 2.0 * Z_FAR * Z_NEAR / (Z_NEAR - Z_FAR);
+    gl_Position = vec4(p3.x * DIST_3D / uAspect, p3.y * DIST_3D, clip_z, perspDiv);
     vColor = aColor;
 }
