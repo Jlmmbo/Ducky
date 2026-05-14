@@ -119,6 +119,8 @@ static void processInput(GLFWwindow* window, Transform4D& t) {
     if (glfwGetKey(window, GLFW_KEY_0) == GLFW_PRESS) t.angleYW -= ROTATE_SPEED;
     if (glfwGetKey(window, GLFW_KEY_MINUS) == GLFW_PRESS) t.angleZW += ROTATE_SPEED;
     if (glfwGetKey(window, GLFW_KEY_EQUAL) == GLFW_PRESS) t.angleZW -= ROTATE_SPEED;
+
+    if (glfwGetKey(window, GLFW_KEY_R) == GLFW_PRESS) t = Transform4D{};
 }
 
 int main() {
