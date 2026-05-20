@@ -13,7 +13,7 @@ Ducky visualizes 4D objects (currently a tesseract/hypercube) by projecting them
 ## Features
 
 - **4D Perspective Projection**: Projects 4D geometry to 3D, then to 2D screen space
-- **6 Rotation Planes**: Rotate in XY, XZ, XW, YZ, YW, ZW planes
+- **3 Rotation Angles**: Rotate in XW, YW, ZW planes (minimum rotation angles for 4D)
 - **4D Translation**: Move through X, Y, Z, and W dimensions
 - **Textured Rendering**: Apply 2D textures to 4D geometry with UV mapping
 - **Coordinate Axes**: Visualize X (red), Y (green), Z (blue), and W (purple) axes
@@ -70,12 +70,9 @@ x86_64-w64-mingw32-g++ src/glad.c src/main.cpp \
 ### Rotation (4D Planes)
 | Key | Action |
 |-----|--------|
-| `1` / `2` | Rotate in XY plane |
-| `3` / `4` | Rotate in XZ plane |
-| `5` / `6` | Rotate in XW plane |
-| `7` / `8` | Rotate in YZ plane |
-| `9` / `0` | Rotate in YW plane |
-| `-` / `=` | Rotate in ZW plane |
+| `1` / `2` | Rotate in XW plane |
+| `3` / `4` | Rotate in YW plane |
+| `5` / `6` | Rotate in ZW plane |
 
 ## .dky Model Format
 

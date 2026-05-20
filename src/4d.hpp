@@ -32,14 +32,11 @@ static inline void rotatePlane(float& a, float& b, float angle) {
     b = nb;
 }
 
-Vecf4 rotate4d(Vecf4 position, Vecf4 center, float rotation[6]){
+Vecf4 rotate4d(Vecf4 position, Vecf4 center, float rotation[3]){
     Vecf4 tmp;
     tmp = position - center;
-    rotatePlane(tmp.x, tmp.y, rotation[0]);
-    rotatePlane(tmp.x, tmp.z, rotation[1]);
-    rotatePlane(tmp.x, tmp.w, rotation[2]);
-    rotatePlane(tmp.y, tmp.z, rotation[3]);
-    rotatePlane(tmp.y, tmp.w, rotation[4]);
-    rotatePlane(tmp.z, tmp.w, rotation[5]);
+    rotatePlane(tmp.x, tmp.w, rotation[0]);
+    rotatePlane(tmp.y, tmp.w, rotation[1]);
+    rotatePlane(tmp.z, tmp.w, rotation[2]);
     return tmp + center;
 }

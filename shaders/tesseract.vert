@@ -4,10 +4,7 @@ layout(location = 1) in vec3 aTexCoord;
 
 out vec3 vTexCoord;
 
-uniform float angleXY;
-uniform float angleXZ;
 uniform float angleXW;
-uniform float angleYZ;
 uniform float angleYW;
 uniform float angleZW;
 uniform vec4 translation;
@@ -30,21 +27,9 @@ void main() {
 
     float c, s, nx, ny, nz, nw;
 
-    c = cos(angleXY); s = sin(angleXY);
-    nx = x * c - y * s; ny = x * s + y * c; x = nx; y = ny;
-    nx = tx * c - ty * s; ny = tx * s + ty * c; tx = nx; ty = ny;
-
-    c = cos(angleXZ); s = sin(angleXZ);
-    nx = x * c - z * s; nz = x * s + z * c; x = nx; z = nz;
-    nx = tx * c - tz * s; nz = tx * s + tz * c; tx = nx; tz = nz;
-
     c = cos(angleXW); s = sin(angleXW);
     nx = x * c - w * s; nw = x * s + w * c; x = nx; w = nw;
     nx = tx * c - tw * s; nw = tx * s + tw * c; tx = nx; tw = nw;
-
-    c = cos(angleYZ); s = sin(angleYZ);
-    ny = y * c - z * s; nz = y * s + z * c; y = ny; z = nz;
-    ny = ty * c - tz * s; nz = ty * s + tz * c; ty = ny; tz = nz;
 
     c = cos(angleYW); s = sin(angleYW);
     ny = y * c - w * s; nw = y * s + w * c; y = ny; w = nw;

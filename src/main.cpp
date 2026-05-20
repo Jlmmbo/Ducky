@@ -18,19 +18,18 @@ constexpr float AXIS_LENGTH = 1.5f;
 
 // 4D Transform struct
 struct Transform4D {
-    float angleXY = 0.0f, angleXZ = 0.0f, angleXW = 0.0f;
-    float angleYZ = 0.0f, angleYW = 0.0f, angleZW = 0.0f;
+    float angleXW = 0.0f, angleYW = 0.0f, angleZW = 0.0f;
     float transX = 0.0f, transY = 0.0f, transZ = 0.0f, transW = 0.0f;
 };
 
 // Uniform location caches
 struct TesseractUniforms {
-    GLuint angleXY, angleXZ, angleXW, angleYZ, angleYW, angleZW;
+    GLuint angleXW, angleYW, angleZW;
     GLuint translation, uTexture, uAspect;
 };
 
 struct AxesUniforms {
-    GLuint angleXY, angleXZ, angleXW, angleYZ, angleYW, angleZW;
+    GLuint angleXW, angleYW, angleZW;
     GLuint uAspect;
 };
 
@@ -107,18 +106,12 @@ static void processInput(GLFWwindow* window, Transform4D& t) {
     if (glfwGetKey(window, GLFW_KEY_Z) == GLFW_PRESS) t.transW += MOVE_SPEED;
     if (glfwGetKey(window, GLFW_KEY_X) == GLFW_PRESS) t.transW -= MOVE_SPEED;
 
-    if (glfwGetKey(window, GLFW_KEY_1) == GLFW_PRESS) t.angleXY += ROTATE_SPEED;
-    if (glfwGetKey(window, GLFW_KEY_2) == GLFW_PRESS) t.angleXY -= ROTATE_SPEED;
-    if (glfwGetKey(window, GLFW_KEY_3) == GLFW_PRESS) t.angleXZ += ROTATE_SPEED;
-    if (glfwGetKey(window, GLFW_KEY_4) == GLFW_PRESS) t.angleXZ -= ROTATE_SPEED;
-    if (glfwGetKey(window, GLFW_KEY_5) == GLFW_PRESS) t.angleXW += ROTATE_SPEED;
-    if (glfwGetKey(window, GLFW_KEY_6) == GLFW_PRESS) t.angleXW -= ROTATE_SPEED;
-    if (glfwGetKey(window, GLFW_KEY_7) == GLFW_PRESS) t.angleYZ += ROTATE_SPEED;
-    if (glfwGetKey(window, GLFW_KEY_8) == GLFW_PRESS) t.angleYZ -= ROTATE_SPEED;
-    if (glfwGetKey(window, GLFW_KEY_9) == GLFW_PRESS) t.angleYW += ROTATE_SPEED;
-    if (glfwGetKey(window, GLFW_KEY_0) == GLFW_PRESS) t.angleYW -= ROTATE_SPEED;
-    if (glfwGetKey(window, GLFW_KEY_MINUS) == GLFW_PRESS) t.angleZW += ROTATE_SPEED;
-    if (glfwGetKey(window, GLFW_KEY_EQUAL) == GLFW_PRESS) t.angleZW -= ROTATE_SPEED;
+    if (glfwGetKey(window, GLFW_KEY_1) == GLFW_PRESS) t.angleXW += ROTATE_SPEED;
+    if (glfwGetKey(window, GLFW_KEY_2) == GLFW_PRESS) t.angleXW -= ROTATE_SPEED;
+    if (glfwGetKey(window, GLFW_KEY_3) == GLFW_PRESS) t.angleYW += ROTATE_SPEED;
+    if (glfwGetKey(window, GLFW_KEY_4) == GLFW_PRESS) t.angleYW -= ROTATE_SPEED;
+    if (glfwGetKey(window, GLFW_KEY_5) == GLFW_PRESS) t.angleZW += ROTATE_SPEED;
+    if (glfwGetKey(window, GLFW_KEY_6) == GLFW_PRESS) t.angleZW -= ROTATE_SPEED;
 
     if (glfwGetKey(window, GLFW_KEY_R) == GLFW_PRESS) t = Transform4D{};
 }
@@ -212,10 +205,7 @@ int main() {
     }
 
     TesseractUniforms tessUni;
-    tessUni.angleXY = glGetUniformLocation(tessProgram, "angleXY");
-    tessUni.angleXZ = glGetUniformLocation(tessProgram, "angleXZ");
     tessUni.angleXW = glGetUniformLocation(tessProgram, "angleXW");
-    tessUni.angleYZ = glGetUniformLocation(tessProgram, "angleYZ");
     tessUni.angleYW = glGetUniformLocation(tessProgram, "angleYW");
     tessUni.angleZW = glGetUniformLocation(tessProgram, "angleZW");
     tessUni.translation = glGetUniformLocation(tessProgram, "translation");
@@ -284,10 +274,7 @@ int main() {
     }
 
     AxesUniforms axesUni;
-    axesUni.angleXY = glGetUniformLocation(axesProgram, "angleXY");
-    axesUni.angleXZ = glGetUniformLocation(axesProgram, "angleXZ");
     axesUni.angleXW = glGetUniformLocation(axesProgram, "angleXW");
-    axesUni.angleYZ = glGetUniformLocation(axesProgram, "angleYZ");
     axesUni.angleYW = glGetUniformLocation(axesProgram, "angleYW");
     axesUni.angleZW = glGetUniformLocation(axesProgram, "angleZW");
     axesUni.uAspect = glGetUniformLocation(axesProgram, "uAspect");
@@ -306,12 +293,9 @@ int main() {
     if (!edgeProgram) { glfwTerminate(); return -1; }
 
     struct EdgeUniforms {
-        GLuint angleXY, angleXZ, angleXW, angleYZ, angleYW, angleZW, translation, uAspect;
+        GLuint angleXW, angleYW, angleZW, translation, uAspect;
     } edgeUni;
-    edgeUni.angleXY = glGetUniformLocation(edgeProgram, "angleXY");
-    edgeUni.angleXZ = glGetUniformLocation(edgeProgram, "angleXZ");
     edgeUni.angleXW = glGetUniformLocation(edgeProgram, "angleXW");
-    edgeUni.angleYZ = glGetUniformLocation(edgeProgram, "angleYZ");
     edgeUni.angleYW = glGetUniformLocation(edgeProgram, "angleYW");
     edgeUni.angleZW = glGetUniformLocation(edgeProgram, "angleZW");
     edgeUni.translation = glGetUniformLocation(edgeProgram, "translation");
@@ -324,7 +308,7 @@ int main() {
         return -1;
     }
 
-    const char* hintText = "Controls: WASD-move XY, QE-move Z, ZX-move W, 1234567890-=-rotate planes";
+    const char* hintText = "Controls: WASD-move XY, QE-move Z, ZX-move W, 123456-rotate XW/YW/ZW";
     char textBuffer[20000];
     int numQuads = stb_easy_font_print(10, 10, (char*)hintText, nullptr, textBuffer, sizeof(textBuffer));
 
@@ -356,10 +340,7 @@ int main() {
 
         // Draw tesseract
         glUseProgram(tessProgram);
-        glUniform1f(tessUni.angleXY, transform.angleXY);
-        glUniform1f(tessUni.angleXZ, transform.angleXZ);
         glUniform1f(tessUni.angleXW, transform.angleXW);
-        glUniform1f(tessUni.angleYZ, transform.angleYZ);
         glUniform1f(tessUni.angleYW, transform.angleYW);
         glUniform1f(tessUni.angleZW, transform.angleZW);
         glUniform4f(tessUni.translation, transform.transX, transform.transY, transform.transZ, transform.transW);
@@ -369,10 +350,7 @@ int main() {
 
         // Draw axes
         glUseProgram(axesProgram);
-        glUniform1f(axesUni.angleXY, transform.angleXY);
-        glUniform1f(axesUni.angleXZ, transform.angleXZ);
         glUniform1f(axesUni.angleXW, transform.angleXW);
-        glUniform1f(axesUni.angleYZ, transform.angleYZ);
         glUniform1f(axesUni.angleYW, transform.angleYW);
         glUniform1f(axesUni.angleZW, transform.angleZW);
         glUniform1f(axesUni.uAspect, aspect);
@@ -382,10 +360,7 @@ int main() {
         // Draw white wireframe edges (on top, no depth test)
         glDisable(GL_DEPTH_TEST);
         glUseProgram(edgeProgram);
-        glUniform1f(edgeUni.angleXY, transform.angleXY);
-        glUniform1f(edgeUni.angleXZ, transform.angleXZ);
         glUniform1f(edgeUni.angleXW, transform.angleXW);
-        glUniform1f(edgeUni.angleYZ, transform.angleYZ);
         glUniform1f(edgeUni.angleYW, transform.angleYW);
         glUniform1f(edgeUni.angleZW, transform.angleZW);
         glUniform4f(edgeUni.translation, transform.transX, transform.transY, transform.transZ, transform.transW);
