@@ -1,9 +1,9 @@
 #version 330 core
 layout(location = 0) in vec4 aPos;
 
-uniform float angleXW;
-uniform float angleYW;
-uniform float angleZW;
+uniform vec2 uRotXW;
+uniform vec2 uRotYW;
+uniform vec2 uRotZW;
 uniform vec4 translation;
 uniform float uAspect;
 
@@ -20,15 +20,15 @@ void main() {
 
     float c, s, nx, ny, nz, nw;
 
-    c = cos(angleXW); s = sin(angleXW);
+    c = uRotXW.x; s = uRotXW.y;
     nx = x * c - w * s; nw = x * s + w * c;
     x = nx; w = nw;
 
-    c = cos(angleYW); s = sin(angleYW);
+    c = uRotYW.x; s = uRotYW.y;
     ny = y * c - w * s; nw = y * s + w * c;
     y = ny; w = nw;
 
-    c = cos(angleZW); s = sin(angleZW);
+    c = uRotZW.x; s = uRotZW.y;
     nz = z * c - w * s; nw = z * s + w * c;
     z = nz; w = nw;
 

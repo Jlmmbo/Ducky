@@ -4,9 +4,9 @@ layout(location = 1) in vec3 aTexCoord;
 
 out vec3 vTexCoord;
 
-uniform float angleXW;
-uniform float angleYW;
-uniform float angleZW;
+uniform vec2 uRotXW;
+uniform vec2 uRotYW;
+uniform vec2 uRotZW;
 uniform vec4 translation;
 uniform float uAspect;
 
@@ -22,20 +22,20 @@ void main() {
     float z = aPos.z + translation.z;
     float w = aPos.w + translation.w;
 
-    // Original position for texture (unaffected by translation)
+    // Texture coords in model space (unaffected by translation)
     float tx = aPos.x, ty = aPos.y, tz = aPos.z, tw = aPos.w;
 
     float c, s, nx, ny, nz, nw;
 
-    c = cos(angleXW); s = sin(angleXW);
+    c = uRotXW.x; s = uRotXW.y;
     nx = x * c - w * s; nw = x * s + w * c; x = nx; w = nw;
     nx = tx * c - tw * s; nw = tx * s + tw * c; tx = nx; tw = nw;
 
-    c = cos(angleYW); s = sin(angleYW);
+    c = uRotYW.x; s = uRotYW.y;
     ny = y * c - w * s; nw = y * s + w * c; y = ny; w = nw;
     ny = ty * c - tw * s; nw = ty * s + tw * c; ty = ny; tw = nw;
 
-    c = cos(angleZW); s = sin(angleZW);
+    c = uRotZW.x; s = uRotZW.y;
     nz = z * c - w * s; nw = z * s + w * c; z = nz; w = nw;
     nz = tz * c - tw * s; nw = tz * s + tw * c; tz = nz; tw = nw;
 

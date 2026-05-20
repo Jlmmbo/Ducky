@@ -111,12 +111,13 @@ int main() {
     Window root = RootWindow(display, screen);
 
     GLint attribs[] = {
-        GLX_RGBA,
+        GLX_RENDER_TYPE, GLX_RGBA_BIT,
+        GLX_DRAWABLE_TYPE, GLX_WINDOW_BIT,
         GLX_DEPTH_SIZE, 24,
         GLX_DOUBLEBUFFER,
-        GLX_CONTEXT_MAJOR_VERSION_ARB, 3,
-        GLX_CONTEXT_MINOR_VERSION_ARB, 3,
-        GLX_CONTEXT_PROFILE_MASK_ARB, GLX_CONTEXT_CORE_PROFILE_BIT_ARB,
+        GLX_RED_SIZE, 8,
+        GLX_GREEN_SIZE, 8,
+        GLX_BLUE_SIZE, 8,
         None
     };
 
@@ -164,44 +165,48 @@ int main() {
     }
     std::cout << "GL loaded" << std::endl;
 
-    // Load model
+    // Load model (two-pass: count then read)
     FILE* file = fopen("model.dky", "r");
     if (!file) {
         std::cerr << "Failed to open model\n";
         return -1;
     }
 
-    float* vertices = NULL;
-    unsigned int vertexCount = 0;
-    unsigned int* indices = NULL;
-    unsigned int indexCount = 0;
+    unsigned int vertexCount = 0, indexCount = 0;
     int section = 0;
     char line[256];
-
     while (fgets(line, sizeof(line), file)) {
         if (line[0] == '/' && line[1] == '/') continue;
         if (line[0] == '\n' || line[0] == '\r' || line[0] == '\0') continue;
         if (line[0] == 'f' && line[1] == 'a') { section = 1; continue; }
+        if (section == 0) vertexCount++;
+        else indexCount += 3;
+    }
 
+    float* vertices = new float[vertexCount * 6];
+    unsigned int* indices = new unsigned int[indexCount];
+
+    rewind(file);
+    section = 0;
+    unsigned int vi = 0, ii = 0;
+    while (fgets(line, sizeof(line), file)) {
+        if (line[0] == '/' && line[1] == '/') continue;
+        if (line[0] == '\n' || line[0] == '\r' || line[0] == '\0') continue;
+        if (line[0] == 'f' && line[1] == 'a') { section = 1; continue; }
         if (section == 0) {
             float x, y, z, w, u, v;
             if (sscanf(line, "%f %f %f %f %f %f", &x, &y, &z, &w, &u, &v) == 6) {
-                float* newverts = new float[(vertexCount + 1) * 6];
-                if (vertices) { memcpy(newverts, vertices, vertexCount * 6 * sizeof(float)); delete[] vertices; }
-                vertices = newverts;
-                vertices[vertexCount * 6] = x; vertices[vertexCount * 6 + 1] = y;
-                vertices[vertexCount * 6 + 2] = z; vertices[vertexCount * 6 + 3] = w;
-                vertices[vertexCount * 6 + 4] = u; vertices[vertexCount * 6 + 5] = v;
-                vertexCount++;
+                int off = vi * 6;
+                vertices[off] = x; vertices[off+1] = y;
+                vertices[off+2] = z; vertices[off+3] = w;
+                vertices[off+4] = u; vertices[off+5] = v;
+                vi++;
             }
         } else {
             unsigned int i0, i1, i2;
             if (sscanf(line, "%u %u %u", &i0, &i1, &i2) == 3) {
-                unsigned int* newindices = new unsigned int[indexCount + 3];
-                if (indices) { memcpy(newindices, indices, indexCount * sizeof(unsigned int)); delete[] indices; }
-                indices = newindices;
-                indices[indexCount] = i0; indices[indexCount + 1] = i1; indices[indexCount + 2] = i2;
-                indexCount += 3;
+                indices[ii] = i0; indices[ii+1] = i1; indices[ii+2] = i2;
+                ii += 3;
             }
         }
     }
@@ -248,6 +253,10 @@ int main() {
     stbi_image_free(data);
 
     glUseProgram(program);
+    GLint uAngle4d = glGetUniformLocation(program, "angle4d");
+    GLint uAngle4dY = glGetUniformLocation(program, "angle4dY");
+    GLint uAngle4dZ = glGetUniformLocation(program, "angle4dZ");
+    GLint uTranslation = glGetUniformLocation(program, "translation");
     glUniform1i(glGetUniformLocation(program, "uTexture"), 0);
 
     float angle4d = 0.0f;
@@ -256,10 +265,11 @@ int main() {
     float transX = 0.0f, transY = 0.0f, transZ = 0.0f, transW = 0.0f;
 
     int keys[256] = {0};
-    int frame = 0;
+    bool running = true;
 
-    while (1) {
-        frame++;
+    glEnable(GL_DEPTH_TEST);
+
+    while (running) {
         // Handle events without blocking
         while (XPending(display)) {
             XEvent evt;
@@ -268,8 +278,9 @@ int main() {
                 int keycode = evt.xkey.keycode;
                 keys[keycode] = (evt.type == KeyPress);
             }
-            if (evt.type == DestroyNotify) break;
+            if (evt.type == DestroyNotify) { running = false; break; }
         }
+        if (!running) break;
 
         // Also poll key states directly
         char keys_return[32];
@@ -279,6 +290,9 @@ int main() {
                 keys[i] = 1;
             }
         }
+
+        // Escape to quit
+        if (keys[9]) running = false;
 
         // Translation (WASDQE) - using X11 keycodes
         // w=25, s=39, a=38, d=40, q=24, e=26
@@ -310,18 +324,18 @@ int main() {
         }
 
         glClearColor(0.05f, 0.05f, 0.1f, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-        glUniform1f(glGetUniformLocation(program, "angle4d"), angle4d);
-        glUniform1f(glGetUniformLocation(program, "angle4dY"), angle4dY);
-        glUniform1f(glGetUniformLocation(program, "angle4dZ"), angle4dZ);
-        glUniform4f(glGetUniformLocation(program, "translation"), transX, transY, transZ, transW);
+        glUniform1f(uAngle4d, angle4d);
+        glUniform1f(uAngle4dY, angle4dY);
+        glUniform1f(uAngle4dZ, angle4dZ);
+        glUniform4f(uTranslation, transX, transY, transZ, transW);
 
         glBindVertexArray(VAO);
         glDrawElements(GL_TRIANGLES, indexCount, GL_UNSIGNED_INT, 0);
-        if (frame % 60 == 0) std::cout << "Frame " << frame << std::endl;
 
         glXSwapBuffers(display, win);
+        usleep(16667); // ~60 FPS
     }
 
     delete[] vertices;

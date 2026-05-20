@@ -3,6 +3,8 @@
 #include <iostream>
 #include <fstream>
 #include <string>
+#include <cmath>
+#include <vector>
 
 #include "main.hpp"
 
@@ -24,12 +26,12 @@ struct Transform4D {
 
 // Uniform location caches
 struct TesseractUniforms {
-    GLuint angleXW, angleYW, angleZW;
+    GLuint uRotXW, uRotYW, uRotZW;
     GLuint translation, uTexture, uAspect;
 };
 
 struct AxesUniforms {
-    GLuint angleXW, angleYW, angleZW;
+    GLuint uRotXW, uRotYW, uRotZW;
     GLuint uAspect;
 };
 
@@ -97,8 +99,8 @@ static GLuint createShaderProgram(const std::string& vertPath, const std::string
 
 // Input handling
 static void processInput(GLFWwindow* window, Transform4D& t) {
-    if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) t.transX += MOVE_SPEED;
-    if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) t.transX -= MOVE_SPEED;
+    if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) t.transX -= MOVE_SPEED;
+    if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) t.transX += MOVE_SPEED;
     if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) t.transY += MOVE_SPEED;
     if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) t.transY -= MOVE_SPEED;
     if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS) t.transZ += MOVE_SPEED;
@@ -142,6 +144,7 @@ int main() {
         return -1;
     }
 
+    glfwSwapInterval(1);
     int fbW = 0, fbH = 0;
     glEnable(GL_DEPTH_TEST);
 
@@ -205,9 +208,9 @@ int main() {
     }
 
     TesseractUniforms tessUni;
-    tessUni.angleXW = glGetUniformLocation(tessProgram, "angleXW");
-    tessUni.angleYW = glGetUniformLocation(tessProgram, "angleYW");
-    tessUni.angleZW = glGetUniformLocation(tessProgram, "angleZW");
+    tessUni.uRotXW = glGetUniformLocation(tessProgram, "uRotXW");
+    tessUni.uRotYW = glGetUniformLocation(tessProgram, "uRotYW");
+    tessUni.uRotZW = glGetUniformLocation(tessProgram, "uRotZW");
     tessUni.translation = glGetUniformLocation(tessProgram, "translation");
     tessUni.uTexture = glGetUniformLocation(tessProgram, "uTexture");
     tessUni.uAspect = glGetUniformLocation(tessProgram, "uAspect");
@@ -274,9 +277,9 @@ int main() {
     }
 
     AxesUniforms axesUni;
-    axesUni.angleXW = glGetUniformLocation(axesProgram, "angleXW");
-    axesUni.angleYW = glGetUniformLocation(axesProgram, "angleYW");
-    axesUni.angleZW = glGetUniformLocation(axesProgram, "angleZW");
+    axesUni.uRotXW = glGetUniformLocation(axesProgram, "uRotXW");
+    axesUni.uRotYW = glGetUniformLocation(axesProgram, "uRotYW");
+    axesUni.uRotZW = glGetUniformLocation(axesProgram, "uRotZW");
     axesUni.uAspect = glGetUniformLocation(axesProgram, "uAspect");
 
     // === Wireframe edges setup ===
@@ -293,11 +296,11 @@ int main() {
     if (!edgeProgram) { glfwTerminate(); return -1; }
 
     struct EdgeUniforms {
-        GLuint angleXW, angleYW, angleZW, translation, uAspect;
+        GLuint uRotXW, uRotYW, uRotZW, translation, uAspect;
     } edgeUni;
-    edgeUni.angleXW = glGetUniformLocation(edgeProgram, "angleXW");
-    edgeUni.angleYW = glGetUniformLocation(edgeProgram, "angleYW");
-    edgeUni.angleZW = glGetUniformLocation(edgeProgram, "angleZW");
+    edgeUni.uRotXW = glGetUniformLocation(edgeProgram, "uRotXW");
+    edgeUni.uRotYW = glGetUniformLocation(edgeProgram, "uRotYW");
+    edgeUni.uRotZW = glGetUniformLocation(edgeProgram, "uRotZW");
     edgeUni.translation = glGetUniformLocation(edgeProgram, "translation");
     edgeUni.uAspect = glGetUniformLocation(edgeProgram, "uAspect");
 
@@ -312,9 +315,10 @@ int main() {
     char textBuffer[20000];
     int numQuads = stb_easy_font_print(10, 10, (char*)hintText, nullptr, textBuffer, sizeof(textBuffer));
 
-    GLuint textVAO, textVBO;
+    GLuint textVAO, textVBO, textEBO;
     glGenVertexArrays(1, &textVAO);
     glGenBuffers(1, &textVBO);
+    glGenBuffers(1, &textEBO);
     glBindVertexArray(textVAO);
     glBindBuffer(GL_ARRAY_BUFFER, textVBO);
     glBufferData(GL_ARRAY_BUFFER, numQuads * 64, textBuffer, GL_STATIC_DRAW);
@@ -322,27 +326,48 @@ int main() {
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(1, 4, GL_UNSIGNED_BYTE, GL_TRUE, 16, (void*)12);
     glEnableVertexAttribArray(1);
+
+    // Convert quads to triangles (2 triangles per quad)
+    std::vector<unsigned int> textIndices(numQuads * 6);
+    for (int i = 0; i < numQuads; i++) {
+        int base = i * 4;
+        textIndices[i * 6 + 0] = base;
+        textIndices[i * 6 + 1] = base + 1;
+        textIndices[i * 6 + 2] = base + 2;
+        textIndices[i * 6 + 3] = base + 1;
+        textIndices[i * 6 + 4] = base + 3;
+        textIndices[i * 6 + 5] = base + 2;
+    }
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, textEBO);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, textIndices.size() * sizeof(unsigned int), textIndices.data(), GL_STATIC_DRAW);
+
     GLint textScreenSize = glGetUniformLocation(textProgram, "uScreenSize");
 
     Transform4D transform;
+
+    // Pre-computed rotation cos/sin pairs
+    float rotXW[2], rotYW[2], rotZW[2];
 
     // Render loop
     while (!glfwWindowShouldClose(window)) {
         processInput(window, transform);
 
-        // Update framebuffer size and aspect ratio
         glfwGetFramebufferSize(window, &fbW, &fbH);
         glViewport(0, 0, fbW, fbH);
         float aspect = (float)fbW / (float)fbH;
+
+        rotXW[0] = cosf(transform.angleXW); rotXW[1] = sinf(transform.angleXW);
+        rotYW[0] = cosf(transform.angleYW); rotYW[1] = sinf(transform.angleYW);
+        rotZW[0] = cosf(transform.angleZW); rotZW[1] = sinf(transform.angleZW);
 
         glClearColor(0.05f, 0.05f, 0.1f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
         // Draw tesseract
         glUseProgram(tessProgram);
-        glUniform1f(tessUni.angleXW, transform.angleXW);
-        glUniform1f(tessUni.angleYW, transform.angleYW);
-        glUniform1f(tessUni.angleZW, transform.angleZW);
+        glUniform2fv(tessUni.uRotXW, 1, rotXW);
+        glUniform2fv(tessUni.uRotYW, 1, rotYW);
+        glUniform2fv(tessUni.uRotZW, 1, rotZW);
         glUniform4f(tessUni.translation, transform.transX, transform.transY, transform.transZ, transform.transW);
         glUniform1f(tessUni.uAspect, aspect);
         glBindVertexArray(tessVAO);
@@ -350,9 +375,9 @@ int main() {
 
         // Draw axes
         glUseProgram(axesProgram);
-        glUniform1f(axesUni.angleXW, transform.angleXW);
-        glUniform1f(axesUni.angleYW, transform.angleYW);
-        glUniform1f(axesUni.angleZW, transform.angleZW);
+        glUniform2fv(axesUni.uRotXW, 1, rotXW);
+        glUniform2fv(axesUni.uRotYW, 1, rotYW);
+        glUniform2fv(axesUni.uRotZW, 1, rotZW);
         glUniform1f(axesUni.uAspect, aspect);
         glBindVertexArray(axesVAO);
         glDrawArrays(GL_LINES, 0, 8);
@@ -360,21 +385,19 @@ int main() {
         // Draw white wireframe edges (on top, no depth test)
         glDisable(GL_DEPTH_TEST);
         glUseProgram(edgeProgram);
-        glUniform1f(edgeUni.angleXW, transform.angleXW);
-        glUniform1f(edgeUni.angleYW, transform.angleYW);
-        glUniform1f(edgeUni.angleZW, transform.angleZW);
+        glUniform2fv(edgeUni.uRotXW, 1, rotXW);
+        glUniform2fv(edgeUni.uRotYW, 1, rotYW);
+        glUniform2fv(edgeUni.uRotZW, 1, rotZW);
         glUniform4f(edgeUni.translation, transform.transX, transform.transY, transform.transZ, transform.transW);
         glUniform1f(edgeUni.uAspect, aspect);
         glBindVertexArray(edgeVAO);
         glDrawArrays(GL_LINES, 0, 64);
-        glEnable(GL_DEPTH_TEST);
 
-        // Draw text (disable depth test so HUD is always visible)
-        glDisable(GL_DEPTH_TEST);
+        // Draw text (HUD, also without depth test)
         glUseProgram(textProgram);
         glUniform2f(textScreenSize, fbW, fbH);
         glBindVertexArray(textVAO);
-        glDrawArrays(GL_QUADS, 0, numQuads * 4);
+        glDrawElements(GL_TRIANGLES, numQuads * 6, GL_UNSIGNED_INT, nullptr);
         glEnable(GL_DEPTH_TEST);
 
         glfwSwapBuffers(window);
@@ -394,6 +417,7 @@ int main() {
     glDeleteProgram(edgeProgram);
     glDeleteVertexArrays(1, &textVAO);
     glDeleteBuffers(1, &textVBO);
+    glDeleteBuffers(1, &textEBO);
     glDeleteProgram(tessProgram);
     glDeleteProgram(axesProgram);
     glDeleteProgram(textProgram);
