@@ -4,12 +4,9 @@ layout(location = 1) in vec3 aColor;
 
 flat out vec3 vColor;
 
-uniform float angleXY;
-uniform float angleXZ;
-uniform float angleXW;
-uniform float angleYZ;
-uniform float angleYW;
-uniform float angleZW;
+uniform vec2 uRotXW;
+uniform vec2 uRotYW;
+uniform vec2 uRotZW;
 uniform vec4 translation;
 uniform float uAspect;
 
@@ -25,24 +22,18 @@ void main() {
     float z = aPos.z + translation.z;
     float w = aPos.w + translation.w;
 
+    // Texture coords in model space (unaffected by translation)
+    float tx = aPos.x, ty = aPos.y, tz = aPos.z, tw = aPos.w;
+
     float c, s, nx, ny, nz, nw;
 
-    c = cos(angleXY); s = sin(angleXY);
-    nx = x * c - y * s; ny = x * s + y * c; x = nx; y = ny;
-
-    c = cos(angleXZ); s = sin(angleXZ);
-    nx = x * c - z * s; nz = x * s + z * c; x = nx; z = nz;
-
-    c = cos(angleXW); s = sin(angleXW);
+    c = uRotXW.x; s = uRotXW.y;
     nx = x * c - w * s; nw = x * s + w * c; x = nx; w = nw;
 
-    c = cos(angleYZ); s = sin(angleYZ);
-    ny = y * c - z * s; nz = y * s + z * c; y = ny; z = nz;
-
-    c = cos(angleYW); s = sin(angleYW);
+    c = uRotYW.x; s = uRotYW.y;
     ny = y * c - w * s; nw = y * s + w * c; y = ny; w = nw;
 
-    c = cos(angleZW); s = sin(angleZW);
+    c = uRotZW.x; s = uRotZW.y;
     nz = z * c - w * s; nw = z * s + w * c; z = nz; w = nw;
 
     float wDepth = DIST_4D - w;

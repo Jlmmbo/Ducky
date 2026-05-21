@@ -17,28 +17,36 @@ Model LoadModel(const char* path) {
         return model;
     }
 
+    // First pass: count vertices and indices
     char line[256];
-    int section = 0; // 0=vertices, 1=faces
-
+    int section = 0;
+    unsigned int vertCount = 0, idxCount = 0;
     while (fgets(line, sizeof(line), file)) {
         if (line[0] == '/' && line[1] == '/') continue;
         if (line[0] == '\n' || line[0] == '\r' || line[0] == '\0') continue;
+        if (line[0] == 'f' && line[1] == 'a') { section = 1; continue; }
+        if (section == 0) vertCount++;
+        else idxCount += 3;
+    }
 
-        if (line[0] == 'f' && line[1] == 'a') {
-            section = 1;
-            continue;
-        }
+    model.vertexCount = vertCount;
+    model.indexCount = idxCount;
+    model.vertices = new float[vertCount * 7];
+    model.indices = new unsigned int[idxCount];
+
+    // Second pass: read data
+    rewind(file);
+    section = 0;
+    unsigned int vi = 0, ii = 0;
+    while (fgets(line, sizeof(line), file)) {
+        if (line[0] == '/' && line[1] == '/') continue;
+        if (line[0] == '\n' || line[0] == '\r' || line[0] == '\0') continue;
+        if (line[0] == 'f' && line[1] == 'a') { section = 1; continue; }
 
         if (section == 0) {
             float x, y, z, w, u, v, wt;
             if (sscanf(line, "%f %f %f %f %f %f %f", &x, &y, &z, &w, &u, &v, &wt) == 7) {
-                float* newverts = new float[(model.vertexCount + 1) * 7];
-                if (model.vertices) {
-                    memcpy(newverts, model.vertices, model.vertexCount * 7 * sizeof(float));
-                    delete[] model.vertices;
-                }
-                model.vertices = newverts;
-                int offset = model.vertexCount * 7;
+                int offset = vi * 7;
                 model.vertices[offset] = x;
                 model.vertices[offset + 1] = y;
                 model.vertices[offset + 2] = z;
@@ -46,21 +54,15 @@ Model LoadModel(const char* path) {
                 model.vertices[offset + 4] = u;
                 model.vertices[offset + 5] = v;
                 model.vertices[offset + 6] = wt;
-                model.vertexCount++;
+                vi++;
             }
-        } else if (section == 1) {
+        } else {
             unsigned int i0, i1, i2;
             if (sscanf(line, "%u %u %u", &i0, &i1, &i2) == 3) {
-                unsigned int* newindices = new unsigned int[model.indexCount + 3];
-                if (model.indices) {
-                    memcpy(newindices, model.indices, model.indexCount * sizeof(unsigned int));
-                    delete[] model.indices;
-                }
-                model.indices = newindices;
-                model.indices[model.indexCount] = i0;
-                model.indices[model.indexCount + 1] = i1;
-                model.indices[model.indexCount + 2] = i2;
-                model.indexCount += 3;
+                model.indices[ii] = i0;
+                model.indices[ii + 1] = i1;
+                model.indices[ii + 2] = i2;
+                ii += 3;
             }
         }
     }
