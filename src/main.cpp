@@ -3,6 +3,8 @@
 #include <iostream>
 #include <fstream>
 #include <string>
+#include <algorithm>
+#include <cmath>
 
 #include "main.hpp"
 
@@ -26,8 +28,38 @@ struct Transform4D {
 // Uniform location caches
 struct TesseractUniforms {
     GLuint angleXY, angleXZ, angleXW, angleYZ, angleYW, angleZW;
-    GLuint translation, uTexture, uAspect;
+    GLuint translation, uAspect;
 };
+
+// HSL to RGB conversion for generating distinct colors
+static float hueToRgb(float p, float q, float t) {
+    if (t < 0.0f) t += 1.0f;
+    if (t > 1.0f) t -= 1.0f;
+    if (t < 1.0f/6.0f) return p + (q - p) * 6.0f * t;
+    if (t < 1.0f/2.0f) return q;
+    if (t < 2.0f/3.0f) return p + (q - p) * (2.0f/3.0f - t) * 6.0f;
+    return p;
+}
+
+static void hslToRgb(float h, float s, float l, float& r, float& g, float& b) {
+    if (s == 0.0f) {
+        r = g = b = l;
+    } else {
+        float q = l < 0.5f ? l * (1.0f + s) : l + s - l * s;
+        float p = 2.0f * l - q;
+        r = hueToRgb(p, q, h + 1.0f/3.0f);
+        g = hueToRgb(p, q, h);
+        b = hueToRgb(p, q, h - 1.0f/3.0f);
+    }
+}
+
+static void rotatePlane(float& a, float& b, float angle) {
+    float c = cosf(angle), s = sinf(angle);
+    float na = a * c - b * s;
+    float nb = a * s + b * c;
+    a = na;
+    b = nb;
+}
 
 struct AxesUniforms {
     GLuint angleXY, angleXZ, angleXW, angleYZ, angleYW, angleZW;
@@ -156,6 +188,27 @@ int main() {
     Model model = LoadModel("model.dky");
     std::cout << "Loaded " << model.vertexCount << " vertices, " << model.indexCount << " indices" << std::endl;
 
+    // Assign each face a unique solid color (24 faces, 4 verts per face)
+    {
+        const float goldenRatio = 0.618033988749895f;
+        float faceColors[24][3];
+        for (int i = 0; i < 24; i++) {
+            float h = i * goldenRatio;
+            h = h - floorf(h);
+            float s = 0.85f;
+            float l = 0.45f + ((i / 8) % 3) * 0.2f;
+            hslToRgb(h, s, l, faceColors[i][0], faceColors[i][1], faceColors[i][2]);
+        }
+        for (int i = 0; i < 24; i++) {
+            for (int j = 0; j < 4; j++) {
+                int vi = (i * 4 + j) * 7;
+                model.vertices[vi + 4] = faceColors[i][0];
+                model.vertices[vi + 5] = faceColors[i][1];
+                model.vertices[vi + 6] = faceColors[i][2];
+            }
+        }
+    }
+
     // Generate tesseract wireframe edges (32 edges of the hypercube)
     const int NUM_EDGE_VERTS = 16;
     float edgeVerts[NUM_EDGE_VERTS][4];
@@ -198,7 +251,7 @@ int main() {
     glBindBuffer(GL_ARRAY_BUFFER, tessVBO);
     glBufferData(GL_ARRAY_BUFFER, model.vertexCount * 7 * sizeof(float), model.vertices, GL_STATIC_DRAW);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, tessEBO);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, model.indexCount * sizeof(unsigned int), model.indices, GL_STATIC_DRAW);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, model.indexCount * sizeof(unsigned int), model.indices, GL_DYNAMIC_DRAW);
 
     glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 7 * sizeof(float), nullptr);
     glEnableVertexAttribArray(0);
@@ -219,39 +272,7 @@ int main() {
     tessUni.angleYW = glGetUniformLocation(tessProgram, "angleYW");
     tessUni.angleZW = glGetUniformLocation(tessProgram, "angleZW");
     tessUni.translation = glGetUniformLocation(tessProgram, "translation");
-    tessUni.uTexture = glGetUniformLocation(tessProgram, "uTexture");
     tessUni.uAspect = glGetUniformLocation(tessProgram, "uAspect");
-
-    // Generate 3D gradient texture
-    const int TEX_SIZE = 32;
-    unsigned char texData[TEX_SIZE * TEX_SIZE * TEX_SIZE * 4];
-    for (int z = 0; z < TEX_SIZE; z++) {
-        for (int y = 0; y < TEX_SIZE; y++) {
-            for (int x = 0; x < TEX_SIZE; x++) {
-                int idx = (z * TEX_SIZE * TEX_SIZE + y * TEX_SIZE + x) * 4;
-                texData[idx + 0] = (x * 255) / (TEX_SIZE - 1);
-                texData[idx + 1] = (y * 255) / (TEX_SIZE - 1);
-                texData[idx + 2] = (z * 255) / (TEX_SIZE - 1);
-                texData[idx + 3] = 255;
-            }
-        }
-    }
-
-    GLuint textureID;
-    glGenTextures(1, &textureID);
-    glBindTexture(GL_TEXTURE_3D, textureID);
-    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
-    glTexImage3D(GL_TEXTURE_3D, 0, GL_RGBA, TEX_SIZE, TEX_SIZE, TEX_SIZE, 0, GL_RGBA, GL_UNSIGNED_BYTE, texData);
-    std::cout << "Generated 3D texture: " << TEX_SIZE << "x" << TEX_SIZE << "x" << TEX_SIZE << std::endl;
-
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_3D, textureID);
-    glUseProgram(tessProgram);
-    glUniform1i(tessUni.uTexture, 0);
 
     // === Axes setup ===
     GLuint axesVAO, axesVBO;
@@ -364,6 +385,45 @@ int main() {
         glUniform1f(tessUni.angleZW, transform.angleZW);
         glUniform4f(tessUni.translation, transform.transX, transform.transY, transform.transZ, transform.transW);
         glUniform1f(tessUni.uAspect, aspect);
+
+        // 4D depth sort: compute rotated W for each vertex, sort triangles back-to-front
+        {
+            float rotW[96];
+            for (int i = 0; i < 96; i++) {
+                float x = model.vertices[i * 7];
+                float y = model.vertices[i * 7 + 1];
+                float z = model.vertices[i * 7 + 2];
+                float w = model.vertices[i * 7 + 3];
+                rotatePlane(x, y, transform.angleXY);
+                rotatePlane(x, z, transform.angleXZ);
+                rotatePlane(x, w, transform.angleXW);
+                rotatePlane(y, z, transform.angleYZ);
+                rotatePlane(y, w, transform.angleYW);
+                rotatePlane(z, w, transform.angleZW);
+                rotW[i] = w;
+            }
+
+            struct TriDepth { int idx; float depth; };
+            TriDepth triDepths[48];
+            for (int i = 0; i < 48; i++) {
+                float sum = 0;
+                for (int j = 0; j < 3; j++)
+                    sum += rotW[model.indices[i * 3 + j]];
+                triDepths[i] = {i, sum / 3.0f};
+            }
+            std::sort(triDepths, triDepths + 48,
+                      [](auto& a, auto& b) { return a.depth < b.depth; });
+
+            unsigned int sorted[144];
+            for (int i = 0; i < 48; i++) {
+                int t = triDepths[i].idx;
+                sorted[i * 3 + 0] = model.indices[t * 3 + 0];
+                sorted[i * 3 + 1] = model.indices[t * 3 + 1];
+                sorted[i * 3 + 2] = model.indices[t * 3 + 2];
+            }
+            glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, 0, sizeof(sorted), sorted);
+        }
+
         glBindVertexArray(tessVAO);
         glDrawElements(GL_TRIANGLES, model.indexCount, GL_UNSIGNED_INT, nullptr);
 
@@ -422,7 +482,6 @@ int main() {
     glDeleteProgram(tessProgram);
     glDeleteProgram(axesProgram);
     glDeleteProgram(textProgram);
-    glDeleteTextures(1, &textureID);
 
     glfwTerminate();
     return 0;

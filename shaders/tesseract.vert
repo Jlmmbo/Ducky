@@ -1,8 +1,8 @@
 #version 330 core
 layout(location = 0) in vec4 aPos;
-layout(location = 1) in vec3 aTexCoord;
+layout(location = 1) in vec3 aColor;
 
-out vec3 vTexCoord;
+flat out vec3 vColor;
 
 uniform float angleXY;
 uniform float angleXZ;
@@ -25,34 +25,25 @@ void main() {
     float z = aPos.z + translation.z;
     float w = aPos.w + translation.w;
 
-    // Original position for texture (unaffected by translation)
-    float tx = aPos.x, ty = aPos.y, tz = aPos.z, tw = aPos.w;
-
     float c, s, nx, ny, nz, nw;
 
     c = cos(angleXY); s = sin(angleXY);
     nx = x * c - y * s; ny = x * s + y * c; x = nx; y = ny;
-    nx = tx * c - ty * s; ny = tx * s + ty * c; tx = nx; ty = ny;
 
     c = cos(angleXZ); s = sin(angleXZ);
     nx = x * c - z * s; nz = x * s + z * c; x = nx; z = nz;
-    nx = tx * c - tz * s; nz = tx * s + tz * c; tx = nx; tz = nz;
 
     c = cos(angleXW); s = sin(angleXW);
     nx = x * c - w * s; nw = x * s + w * c; x = nx; w = nw;
-    nx = tx * c - tw * s; nw = tx * s + tw * c; tx = nx; tw = nw;
 
     c = cos(angleYZ); s = sin(angleYZ);
     ny = y * c - z * s; nz = y * s + z * c; y = ny; z = nz;
-    ny = ty * c - tz * s; nz = ty * s + tz * c; ty = ny; tz = nz;
 
     c = cos(angleYW); s = sin(angleYW);
     ny = y * c - w * s; nw = y * s + w * c; y = ny; w = nw;
-    ny = ty * c - tw * s; nw = ty * s + tw * c; ty = ny; tw = nw;
 
     c = cos(angleZW); s = sin(angleZW);
     nz = z * c - w * s; nw = z * s + w * c; z = nz; w = nw;
-    nz = tz * c - tw * s; nw = tz * s + tw * c; tz = nz; tw = nw;
 
     float wDepth = DIST_4D - w;
     float scale4d = wDepth > 0.001 ? DIST_4D / wDepth : 10.0;
@@ -64,5 +55,5 @@ void main() {
     float z_eye = p3.z - DIST_3D;
     float clip_z = z_eye * (Z_FAR + Z_NEAR) / (Z_NEAR - Z_FAR) + 2.0 * Z_FAR * Z_NEAR / (Z_NEAR - Z_FAR);
     gl_Position = vec4(p3.x * DIST_3D / uAspect, p3.y * DIST_3D, clip_z, perspDiv);
-    vTexCoord = vec3(tx, ty, tz) + 0.5;
+    vColor = aColor;
 }

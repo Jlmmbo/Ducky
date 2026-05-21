@@ -1,8 +1,7 @@
 #version 330 core
-in vec3 vTexCoord;
+flat in vec3 vColor;
 out vec4 FragColor;
-uniform sampler3D uTexture;
 
 void main() {
-    FragColor = texture(uTexture, vTexCoord);
+    FragColor = vec4(vColor, 1.0);
 }
