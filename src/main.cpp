@@ -5,6 +5,7 @@
 #include <string>
 #include <algorithm>
 #include <cmath>
+#include <vector>
 
 #include "main.hpp"
 
@@ -26,7 +27,7 @@ struct Transform4D {
 
 // Uniform location caches
 struct TesseractUniforms {
-    GLuint angleXY, angleXZ, angleXW, angleYZ, angleYW, angleZW;
+    GLuint uRotXW, uRotYW, uRotZW;
     GLuint translation, uAspect;
 };
 
@@ -149,8 +150,8 @@ static void processInput(GLFWwindow* window, Transform4D& t) {
 }
 
 int main() {
-    // Init GLFW (disable libdecor for Wayland compatibility)
-    glfwInitHint(GLFW_WAYLAND_LIBDECOR, GLFW_WAYLAND_DISABLE_LIBDECOR);
+    // Init GLFW
+    glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
     if (!glfwInit()) {
         std::cerr << "Failed to initialize GLFW" << std::endl;
         return -1;
@@ -398,10 +399,10 @@ int main() {
                 float y = model.vertices[i * 7 + 1];
                 float z = model.vertices[i * 7 + 2];
                 float w = model.vertices[i * 7 + 3];
-                rotatePlane(x, y, transform.angleXY);
-                rotatePlane(x, z, transform.angleXZ);
+                rotatePlane(x, y, 0.0f);
+                rotatePlane(x, z, 0.0f);
                 rotatePlane(x, w, transform.angleXW);
-                rotatePlane(y, z, transform.angleYZ);
+                rotatePlane(y, z, 0.0f);
                 rotatePlane(y, w, transform.angleYW);
                 rotatePlane(z, w, transform.angleZW);
                 rotW[i] = w;
