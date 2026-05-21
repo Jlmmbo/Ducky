@@ -21,12 +21,14 @@ constexpr float AXIS_LENGTH = 1.5f;
 
 // 4D Transform struct
 struct Transform4D {
+    float angleXY = 0.0f, angleXZ = 0.0f, angleYZ = 0.0f;
     float angleXW = 0.0f, angleYW = 0.0f, angleZW = 0.0f;
     float transX = 0.0f, transY = 0.0f, transZ = 0.0f, transW = 0.0f;
 };
 
 // Uniform location caches
 struct TesseractUniforms {
+    GLuint uRotXY, uRotXZ, uRotYZ;
     GLuint uRotXW, uRotYW, uRotZW;
     GLuint translation, uAspect;
 };
@@ -62,6 +64,7 @@ static void rotatePlane(float& a, float& b, float angle) {
 }
 
 struct AxesUniforms {
+    GLuint uRotXY, uRotXZ, uRotYZ;
     GLuint uRotXW, uRotYW, uRotZW;
     GLuint uAspect;
 };
@@ -139,12 +142,19 @@ static void processInput(GLFWwindow* window, Transform4D& t) {
     if (glfwGetKey(window, GLFW_KEY_Z) == GLFW_PRESS) t.transW += MOVE_SPEED;
     if (glfwGetKey(window, GLFW_KEY_X) == GLFW_PRESS) t.transW -= MOVE_SPEED;
 
-    if (glfwGetKey(window, GLFW_KEY_1) == GLFW_PRESS) t.angleXW += ROTATE_SPEED;
-    if (glfwGetKey(window, GLFW_KEY_2) == GLFW_PRESS) t.angleXW -= ROTATE_SPEED;
-    if (glfwGetKey(window, GLFW_KEY_3) == GLFW_PRESS) t.angleYW += ROTATE_SPEED;
-    if (glfwGetKey(window, GLFW_KEY_4) == GLFW_PRESS) t.angleYW -= ROTATE_SPEED;
-    if (glfwGetKey(window, GLFW_KEY_5) == GLFW_PRESS) t.angleZW += ROTATE_SPEED;
-    if (glfwGetKey(window, GLFW_KEY_6) == GLFW_PRESS) t.angleZW -= ROTATE_SPEED;
+    if (glfwGetKey(window, GLFW_KEY_1) == GLFW_PRESS) t.angleXY += ROTATE_SPEED;
+    if (glfwGetKey(window, GLFW_KEY_2) == GLFW_PRESS) t.angleXY -= ROTATE_SPEED;
+    if (glfwGetKey(window, GLFW_KEY_3) == GLFW_PRESS) t.angleXZ += ROTATE_SPEED;
+    if (glfwGetKey(window, GLFW_KEY_4) == GLFW_PRESS) t.angleXZ -= ROTATE_SPEED;
+    if (glfwGetKey(window, GLFW_KEY_5) == GLFW_PRESS) t.angleYZ += ROTATE_SPEED;
+    if (glfwGetKey(window, GLFW_KEY_6) == GLFW_PRESS) t.angleYZ -= ROTATE_SPEED;
+
+    if (glfwGetKey(window, GLFW_KEY_7) == GLFW_PRESS) t.angleXW += ROTATE_SPEED;
+    if (glfwGetKey(window, GLFW_KEY_8) == GLFW_PRESS) t.angleXW -= ROTATE_SPEED;
+    if (glfwGetKey(window, GLFW_KEY_9) == GLFW_PRESS) t.angleYW += ROTATE_SPEED;
+    if (glfwGetKey(window, GLFW_KEY_0) == GLFW_PRESS) t.angleYW -= ROTATE_SPEED;
+    if (glfwGetKey(window, GLFW_KEY_MINUS) == GLFW_PRESS) t.angleZW += ROTATE_SPEED;
+    if (glfwGetKey(window, GLFW_KEY_EQUAL) == GLFW_PRESS) t.angleZW -= ROTATE_SPEED;
 
     if (glfwGetKey(window, GLFW_KEY_R) == GLFW_PRESS) t = Transform4D{};
 }
@@ -260,6 +270,9 @@ int main() {
     }
 
     TesseractUniforms tessUni;
+    tessUni.uRotXY = glGetUniformLocation(tessProgram, "uRotXY");
+    tessUni.uRotXZ = glGetUniformLocation(tessProgram, "uRotXZ");
+    tessUni.uRotYZ = glGetUniformLocation(tessProgram, "uRotYZ");
     tessUni.uRotXW = glGetUniformLocation(tessProgram, "uRotXW");
     tessUni.uRotYW = glGetUniformLocation(tessProgram, "uRotYW");
     tessUni.uRotZW = glGetUniformLocation(tessProgram, "uRotZW");
@@ -297,6 +310,9 @@ int main() {
     }
 
     AxesUniforms axesUni;
+    axesUni.uRotXY = glGetUniformLocation(axesProgram, "uRotXY");
+    axesUni.uRotXZ = glGetUniformLocation(axesProgram, "uRotXZ");
+    axesUni.uRotYZ = glGetUniformLocation(axesProgram, "uRotYZ");
     axesUni.uRotXW = glGetUniformLocation(axesProgram, "uRotXW");
     axesUni.uRotYW = glGetUniformLocation(axesProgram, "uRotYW");
     axesUni.uRotZW = glGetUniformLocation(axesProgram, "uRotZW");
@@ -316,8 +332,11 @@ int main() {
     if (!edgeProgram) { glfwTerminate(); return -1; }
 
     struct EdgeUniforms {
-        GLuint uRotXW, uRotYW, uRotZW, translation, uAspect;
+        GLuint uRotXY, uRotXZ, uRotYZ, uRotXW, uRotYW, uRotZW, translation, uAspect;
     } edgeUni;
+    edgeUni.uRotXY = glGetUniformLocation(edgeProgram, "uRotXY");
+    edgeUni.uRotXZ = glGetUniformLocation(edgeProgram, "uRotXZ");
+    edgeUni.uRotYZ = glGetUniformLocation(edgeProgram, "uRotYZ");
     edgeUni.uRotXW = glGetUniformLocation(edgeProgram, "uRotXW");
     edgeUni.uRotYW = glGetUniformLocation(edgeProgram, "uRotYW");
     edgeUni.uRotZW = glGetUniformLocation(edgeProgram, "uRotZW");
@@ -331,7 +350,7 @@ int main() {
         return -1;
     }
 
-    const char* hintText = "Controls: WASD-move XY, QE-move Z, ZX-move W, 123456-rotate XW/YW/ZW";
+    const char* hintText = "Controls: WASD-move XY, QE-move Z, ZX-move W, 123456-rotate XY/XZ/YZ, 7890-/+ rotate XW/YW/ZW";
     char textBuffer[20000];
     int numQuads = stb_easy_font_print(10, 10, (char*)hintText, nullptr, textBuffer, sizeof(textBuffer));
 
@@ -366,7 +385,7 @@ int main() {
     Transform4D transform;
 
     // Pre-computed rotation cos/sin pairs
-    float rotXW[2], rotYW[2], rotZW[2];
+    float rotXY[2], rotXZ[2], rotYZ[2], rotXW[2], rotYW[2], rotZW[2];
 
     // Render loop
     while (!glfwWindowShouldClose(window)) {
@@ -376,6 +395,9 @@ int main() {
         glViewport(0, 0, fbW, fbH);
         float aspect = (float)fbW / (float)fbH;
 
+        rotXY[0] = cosf(transform.angleXY); rotXY[1] = sinf(transform.angleXY);
+        rotXZ[0] = cosf(transform.angleXZ); rotXZ[1] = sinf(transform.angleXZ);
+        rotYZ[0] = cosf(transform.angleYZ); rotYZ[1] = sinf(transform.angleYZ);
         rotXW[0] = cosf(transform.angleXW); rotXW[1] = sinf(transform.angleXW);
         rotYW[0] = cosf(transform.angleYW); rotYW[1] = sinf(transform.angleYW);
         rotZW[0] = cosf(transform.angleZW); rotZW[1] = sinf(transform.angleZW);
@@ -385,6 +407,9 @@ int main() {
 
         // Draw tesseract
         glUseProgram(tessProgram);
+        glUniform2fv(tessUni.uRotXY, 1, rotXY);
+        glUniform2fv(tessUni.uRotXZ, 1, rotXZ);
+        glUniform2fv(tessUni.uRotYZ, 1, rotYZ);
         glUniform2fv(tessUni.uRotXW, 1, rotXW);
         glUniform2fv(tessUni.uRotYW, 1, rotYW);
         glUniform2fv(tessUni.uRotZW, 1, rotZW);
@@ -399,10 +424,10 @@ int main() {
                 float y = model.vertices[i * 7 + 1];
                 float z = model.vertices[i * 7 + 2];
                 float w = model.vertices[i * 7 + 3];
-                rotatePlane(x, y, 0.0f);
-                rotatePlane(x, z, 0.0f);
+                rotatePlane(x, y, transform.angleXY);
+                rotatePlane(x, z, transform.angleXZ);
                 rotatePlane(x, w, transform.angleXW);
-                rotatePlane(y, z, 0.0f);
+                rotatePlane(y, z, transform.angleYZ);
                 rotatePlane(y, w, transform.angleYW);
                 rotatePlane(z, w, transform.angleZW);
                 rotW[i] = w;
@@ -434,6 +459,9 @@ int main() {
 
         // Draw axes
         glUseProgram(axesProgram);
+        glUniform2fv(axesUni.uRotXY, 1, rotXY);
+        glUniform2fv(axesUni.uRotXZ, 1, rotXZ);
+        glUniform2fv(axesUni.uRotYZ, 1, rotYZ);
         glUniform2fv(axesUni.uRotXW, 1, rotXW);
         glUniform2fv(axesUni.uRotYW, 1, rotYW);
         glUniform2fv(axesUni.uRotZW, 1, rotZW);
@@ -444,6 +472,9 @@ int main() {
         // Draw white wireframe edges (on top, no depth test)
         glDisable(GL_DEPTH_TEST);
         glUseProgram(edgeProgram);
+        glUniform2fv(edgeUni.uRotXY, 1, rotXY);
+        glUniform2fv(edgeUni.uRotXZ, 1, rotXZ);
+        glUniform2fv(edgeUni.uRotYZ, 1, rotYZ);
         glUniform2fv(edgeUni.uRotXW, 1, rotXW);
         glUniform2fv(edgeUni.uRotYW, 1, rotYW);
         glUniform2fv(edgeUni.uRotZW, 1, rotZW);

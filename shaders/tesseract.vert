@@ -4,6 +4,9 @@ layout(location = 1) in vec3 aColor;
 
 flat out vec3 vColor;
 
+uniform vec2 uRotXY;
+uniform vec2 uRotXZ;
+uniform vec2 uRotYZ;
 uniform vec2 uRotXW;
 uniform vec2 uRotYW;
 uniform vec2 uRotZW;
@@ -26,6 +29,15 @@ void main() {
     float tx = aPos.x, ty = aPos.y, tz = aPos.z, tw = aPos.w;
 
     float c, s, nx, ny, nz, nw;
+
+    c = uRotXY.x; s = uRotXY.y;
+    nx = x * c - y * s; ny = x * s + y * c; x = nx; y = ny;
+
+    c = uRotXZ.x; s = uRotXZ.y;
+    nx = x * c - z * s; nz = x * s + z * c; x = nx; z = nz;
+
+    c = uRotYZ.x; s = uRotYZ.y;
+    ny = y * c - z * s; nz = y * s + z * c; y = ny; z = nz;
 
     c = uRotXW.x; s = uRotXW.y;
     nx = x * c - w * s; nw = x * s + w * c; x = nx; w = nw;
