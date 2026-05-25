@@ -1,6 +1,6 @@
 # Ducky
 
-A real-time 4D object viewer that renders hyperdimensional geometry through perspective projection.
+A real-time N-dimensional object viewer that renders hyperdimensional geometry through recursive perspective projection.
 
 ## Origin
 
@@ -8,16 +8,17 @@ The name "Ducky" comes from the evolution: **4D vectors** → quad-vect → quad
 
 ## Overview
 
-Ducky visualizes 4D objects (currently a tesseract/hypercube) by projecting them into 3D space, then into 2D for display. It supports full 4D rotation and translation with real-time rendering using OpenGL.
+Ducky visualizes N-dimensional objects (3D, 4D, 5D, ...) by recursively projecting them down through each dimension (N-D → (N-1)-D → ... → 3D) then into 2D for display. It supports full N-D rotation and translation with real-time rendering using OpenGL. The number of dimensions is read from the model file, so any dimension count (3+) works automatically.
 
 ## Features
 
-- **4D Perspective Projection**: Projects 4D geometry to 3D, then to 2D screen space
-- **3 Rotation Angles**: Rotate in XW, YW, ZW planes (minimum rotation angles for 4D)
-- **4D Translation**: Move through X, Y, Z, and W dimensions
-- **Textured Rendering**: Apply 2D textures to 4D geometry with UV mapping
-- **Coordinate Axes**: Visualize X (red), Y (green), Z (blue), and W (purple) axes
-- **Custom Model Format**: Simple `.dky` format for defining 4D meshes
+- **N-D Perspective Projection**: Recursively projects N-D geometry down to 3D, then to 2D screen space
+- **N-D Rotation**: All N×(N-1)/2 rotation planes supported (first 6 have key bindings, rest auto-rotate)
+- **N-D Translation**: Move through all N dimensions
+- **Face-Colored Rendering**: Distinct HSL-based colors per face
+- **Coordinate Axes**: Visualize all N axes with distinct colors
+- **Wireframe Overlay**: Auto-generated edges from mesh topology
+- **Custom Model Format**: Simple `.dky` format with `dims N` header for defining N-D meshes
 - **Cross-Platform**: Builds on Linux and Windows (via cross-compilation)
 
 ## Building
@@ -59,42 +60,56 @@ x86_64-w64-mingw32-g++ src/glad.c src/main.cpp \
 
 ## Controls
 
-### Translation (4D Movement)
+### Translation (N-D Movement)
 | Key | Action |
 |-----|--------|
-| `W` / `S` | Move in Y axis |
-| `A` / `D` | Move in X axis |
-| `Q` / `E` | Move in Z axis |
-| `Z` / `X` | Move in W axis |
+| `A` / `D` | Move in dimension 0 (X) |
+| `W` / `S` | Move in dimension 1 (Y) |
+| `Q` / `E` | Move in dimension 2 (Z) |
+| `Z` / `X` | Move in dimension 3 (W) |
+| `T` / `G` | Move in dimension 4 |
+| `B` / `H` | Move in dimension 5 |
 
-### Rotation (4D Planes)
+### Rotation (N-D Planes)
 | Key | Action |
 |-----|--------|
-| `1` / `2` | Rotate in XW plane |
-| `3` / `4` | Rotate in YW plane |
-| `5` / `6` | Rotate in ZW plane |
+| `1` / `2` | Rotate in plane 0-1 |
+| `3` / `4` | Rotate in plane 0-2 |
+| `5` / `6` | Rotate in plane 1-2 |
+| `7` / `8` | Rotate in plane 0-3 |
+| `9` / `0` | Rotate in plane 1-3 |
+| `-` / `=` | Rotate in plane 2-3 |
+
+Planes beyond the first 6 auto-rotate at a slow pace.
+
+### Other
+| Key | Action |
+|-----|--------|
+| `R` | Reset all rotations and translations |
 
 ## .dky Model Format
 
-The custom `.dky` format defines 4D meshes with vertices and faces:
+The custom `.dky` format defines N-dimensional meshes with a dimension header, vertices, and faces:
 
 ```
+dims [N]
 // Comments start with //
-[x1] [y1] [z1] [w1] [u1] [v1]
-[x2] [y2] [z2] [w2] [u2] [v2]
+[p1] [p2] ... [pN] [r] [g] [b]
 ...
 face
 [index1] [index2] [index3]
 ...
 ```
 
-- **Vertices**: 6 values per vertex (x, y, z, w, u, v) where (x,y,z,w) is the 4D position and (u,v) are texture coordinates
+- **Header**: `dims N` sets the spatial dimension count (must be 3+)
+- **Vertices**: N + 3 values per vertex — N position coordinates followed by RGB color
 - **Faces**: `face` header followed by triangle indices (0-based)
 
 Example from `model.dky`:
 ```
-// Tesseract vertex
--0.5 -0.5 -0.5 -0.5 0.0 0.0
+dims 4
+// Tesseract vertex: x y z w r g b
+-0.5 -0.5 -0.5 -0.5 0.0 0.0 0.0
 
 // Face definition
 face
@@ -108,19 +123,22 @@ Ducky/
 ├── src/              # Source files
 │   ├── main.cpp      # Main application & rendering loop
 │   ├── main.hpp      # Model loading (LoadModel)
-│   ├── 4d.hpp        # 4D vector & rotation math
-│   ├── 3d.hpp        # 3D utilities
-│   ├── 2d.hpp        # 2D utilities
-│   ├── camera.hpp    # Camera controls
-│   ├── render.hpp    # Rendering helpers
+│   ├── dimensions.hpp # N-D coordinate math (unused in current build)
+│   ├── 4d.hpp        # 4D vector math (unused in current build)
+│   ├── 3d.hpp        # 3D utilities (unused in current build)
+│   ├── 2d.hpp        # 2D utilities (unused in current build)
+│   ├── camera.hpp    # Camera controls (unused in current build)
+│   ├── render.hpp    # Rendering helpers (unused in current build)
 │   ├── glad.c        # OpenGL loader
 │   ├── stb_image.h   # Texture loading
 │   └── stb_easy_font.h # Text rendering
 ├── shaders/          # GLSL shaders
-│   ├── tesseract.vert # 4D→3D→2D projection shader
-│   ├── tesseract.frag # Textured fragment shader
-│   ├── axes.vert     # Coordinate axes shader
+│   ├── tesseract.vert # 3D→2D projection vertex shader
+│   ├── tesseract.frag # Flat-colored fragment shader
+│   ├── axes.vert     # Coordinate axes vertex shader
 │   ├── axes.frag
+│   ├── edge.vert     # Wireframe edge vertex shader
+│   ├── edge.frag
 │   ├── text.vert     # On-screen text shader
 │   └── text.frag
 ├── include/          # Headers (GLFW, GLAD, KHR)

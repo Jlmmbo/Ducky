@@ -5,45 +5,45 @@
 #include <string>
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <vector>
+#include <cstdlib>
 
 #include "main.hpp"
 
 #define STB_EASY_FONT_IMPLEMENTATION
 #include "stb_easy_font.h"
 
-// Constants
 constexpr int WINDOW_WIDTH = 1920;
 constexpr int WINDOW_HEIGHT = 1920;
 constexpr float MOVE_SPEED = 0.02f;
 constexpr float ROTATE_SPEED = 0.02f;
 constexpr float AXIS_LENGTH = 1.5f;
 
-// 4D Transform struct
-struct Transform4D {
-    float angleXY = 0.0f, angleXZ = 0.0f, angleYZ = 0.0f;
-    float angleXW = 0.0f, angleYW = 0.0f, angleZW = 0.0f;
-    float transX = 0.0f, transY = 0.0f, transZ = 0.0f, transW = 0.0f;
-};
+struct TransformND {
+    std::vector<float> angles;
+    std::vector<float> translation;
+    unsigned int dims;
 
-// Uniform location caches
-struct TesseractUniforms {
-    GLuint uRotXY, uRotXZ, uRotYZ;
-    GLuint uRotXW, uRotYW, uRotZW;
-    GLuint translation, uAspect;
-};
+    int planeCount() const { return dims * (dims - 1) / 2; }
 
-// HSL to RGB conversion for generating distinct colors
-static float hueToRgb(float p, float q, float t) {
-    if (t < 0.0f) t += 1.0f;
-    if (t > 1.0f) t -= 1.0f;
-    if (t < 1.0f/6.0f) return p + (q - p) * 6.0f * t;
-    if (t < 1.0f/2.0f) return q;
-    if (t < 2.0f/3.0f) return p + (q - p) * (2.0f/3.0f - t) * 6.0f;
-    return p;
-}
+    int planeIndex(int i, int j) const {
+        int idx = 0;
+        for (int a = 0; a < i; a++)
+            idx += dims - a - 1;
+        return idx + (j - i - 1);
+    }
+};
 
 static void hslToRgb(float h, float s, float l, float& r, float& g, float& b) {
+    auto hueToRgb = [](float p, float q, float t) {
+        if (t < 0.0f) t += 1.0f;
+        if (t > 1.0f) t -= 1.0f;
+        if (t < 1.0f/6.0f) return p + (q - p) * 6.0f * t;
+        if (t < 1.0f/2.0f) return q;
+        if (t < 2.0f/3.0f) return p + (q - p) * (2.0f/3.0f - t) * 6.0f;
+        return p;
+    };
     if (s == 0.0f) {
         r = g = b = l;
     } else {
@@ -63,11 +63,32 @@ static void rotatePlane(float& a, float& b, float angle) {
     b = nb;
 }
 
-struct AxesUniforms {
-    GLuint uRotXY, uRotXZ, uRotYZ;
-    GLuint uRotXW, uRotYW, uRotZW;
-    GLuint uAspect;
-};
+static void applyRotation(float* pos, const TransformND& t) {
+    for (int i = 0; i < (int)t.dims; i++) {
+        for (int j = i + 1; j < (int)t.dims; j++) {
+            float angle = t.angles[t.planeIndex(i, j)];
+            if (fabsf(angle) > 0.0001f)
+                rotatePlane(pos[i], pos[j], angle);
+        }
+    }
+}
+
+static void projectTo3D(const float* in, float* out, int dims) {
+    float tmp[16];
+    for (int i = 0; i < dims; i++) tmp[i] = in[i];
+
+    for (int d = dims - 1; d >= 3; d--) {
+        float dist = (float)d;
+        float depth = dist - tmp[d];
+        float scale = depth > 0.001f ? dist / depth : 10.0f;
+        for (int c = 0; c < d; c++)
+            tmp[c] *= scale;
+    }
+
+    out[0] = tmp[0];
+    out[1] = tmp[1];
+    out[2] = tmp[2];
+}
 
 // Load file to string
 static std::string loadFile(const std::string& path) {
@@ -79,7 +100,6 @@ static std::string loadFile(const std::string& path) {
     return std::string((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
 }
 
-// Shader error checking
 static void checkShaderCompile(GLuint shader, const std::string& type) {
     int success;
     glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
@@ -100,7 +120,6 @@ static void checkProgramLink(GLuint program) {
     }
 }
 
-// Create shader program from files
 static GLuint createShaderProgram(const std::string& vertPath, const std::string& fragPath) {
     std::string vertSrc = loadFile(vertPath);
     std::string fragSrc = loadFile(fragPath);
@@ -124,43 +143,96 @@ static GLuint createShaderProgram(const std::string& vertPath, const std::string
     glLinkProgram(program);
     checkProgramLink(program);
 
-    // Shaders can be deleted after linking
     glDeleteShader(vertShader);
     glDeleteShader(fragShader);
 
     return program;
 }
 
-// Input handling
-static void processInput(GLFWwindow* window, Transform4D& t) {
-    if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) t.transX -= MOVE_SPEED;
-    if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) t.transX += MOVE_SPEED;
-    if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) t.transY += MOVE_SPEED;
-    if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) t.transY -= MOVE_SPEED;
-    if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS) t.transZ += MOVE_SPEED;
-    if (glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS) t.transZ -= MOVE_SPEED;
-    if (glfwGetKey(window, GLFW_KEY_Z) == GLFW_PRESS) t.transW += MOVE_SPEED;
-    if (glfwGetKey(window, GLFW_KEY_X) == GLFW_PRESS) t.transW -= MOVE_SPEED;
+static void processInput(GLFWwindow* window, TransformND& t) {
+    // Translation: map dims to keys
+    if (t.dims >= 1) {
+        if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) t.translation[0] -= MOVE_SPEED;
+        if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) t.translation[0] += MOVE_SPEED;
+    }
+    if (t.dims >= 2) {
+        if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) t.translation[1] += MOVE_SPEED;
+        if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) t.translation[1] -= MOVE_SPEED;
+    }
+    if (t.dims >= 3) {
+        if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS) t.translation[2] += MOVE_SPEED;
+        if (glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS) t.translation[2] -= MOVE_SPEED;
+    }
+    if (t.dims >= 4) {
+        if (glfwGetKey(window, GLFW_KEY_Z) == GLFW_PRESS) t.translation[3] += MOVE_SPEED;
+        if (glfwGetKey(window, GLFW_KEY_X) == GLFW_PRESS) t.translation[3] -= MOVE_SPEED;
+    }
+    if (t.dims >= 5) {
+        if (glfwGetKey(window, GLFW_KEY_T) == GLFW_PRESS) t.translation[4] += MOVE_SPEED;
+        if (glfwGetKey(window, GLFW_KEY_G) == GLFW_PRESS) t.translation[4] -= MOVE_SPEED;
+    }
+    if (t.dims >= 6) {
+        if (glfwGetKey(window, GLFW_KEY_B) == GLFW_PRESS) t.translation[5] += MOVE_SPEED;
+        if (glfwGetKey(window, GLFW_KEY_H) == GLFW_PRESS) t.translation[5] -= MOVE_SPEED;
+    }
 
-    if (glfwGetKey(window, GLFW_KEY_1) == GLFW_PRESS) t.angleXY += ROTATE_SPEED;
-    if (glfwGetKey(window, GLFW_KEY_2) == GLFW_PRESS) t.angleXY -= ROTATE_SPEED;
-    if (glfwGetKey(window, GLFW_KEY_3) == GLFW_PRESS) t.angleXZ += ROTATE_SPEED;
-    if (glfwGetKey(window, GLFW_KEY_4) == GLFW_PRESS) t.angleXZ -= ROTATE_SPEED;
-    if (glfwGetKey(window, GLFW_KEY_5) == GLFW_PRESS) t.angleYZ += ROTATE_SPEED;
-    if (glfwGetKey(window, GLFW_KEY_6) == GLFW_PRESS) t.angleYZ -= ROTATE_SPEED;
+    // Rotation: map first 6 planes to number keys
+    if (t.planeCount() >= 1) {
+        if (glfwGetKey(window, GLFW_KEY_1) == GLFW_PRESS) t.angles[0] += ROTATE_SPEED;
+        if (glfwGetKey(window, GLFW_KEY_2) == GLFW_PRESS) t.angles[0] -= ROTATE_SPEED;
+    }
+    if (t.planeCount() >= 2) {
+        if (glfwGetKey(window, GLFW_KEY_3) == GLFW_PRESS) t.angles[1] += ROTATE_SPEED;
+        if (glfwGetKey(window, GLFW_KEY_4) == GLFW_PRESS) t.angles[1] -= ROTATE_SPEED;
+    }
+    if (t.planeCount() >= 3) {
+        if (glfwGetKey(window, GLFW_KEY_5) == GLFW_PRESS) t.angles[2] += ROTATE_SPEED;
+        if (glfwGetKey(window, GLFW_KEY_6) == GLFW_PRESS) t.angles[2] -= ROTATE_SPEED;
+    }
+    if (t.planeCount() >= 4) {
+        if (glfwGetKey(window, GLFW_KEY_7) == GLFW_PRESS) t.angles[3] += ROTATE_SPEED;
+        if (glfwGetKey(window, GLFW_KEY_8) == GLFW_PRESS) t.angles[3] -= ROTATE_SPEED;
+    }
+    if (t.planeCount() >= 5) {
+        if (glfwGetKey(window, GLFW_KEY_9) == GLFW_PRESS) t.angles[4] += ROTATE_SPEED;
+        if (glfwGetKey(window, GLFW_KEY_0) == GLFW_PRESS) t.angles[4] -= ROTATE_SPEED;
+    }
+    if (t.planeCount() >= 6) {
+        if (glfwGetKey(window, GLFW_KEY_MINUS) == GLFW_PRESS) t.angles[5] += ROTATE_SPEED;
+        if (glfwGetKey(window, GLFW_KEY_EQUAL) == GLFW_PRESS) t.angles[5] -= ROTATE_SPEED;
+    }
 
-    if (glfwGetKey(window, GLFW_KEY_7) == GLFW_PRESS) t.angleXW += ROTATE_SPEED;
-    if (glfwGetKey(window, GLFW_KEY_8) == GLFW_PRESS) t.angleXW -= ROTATE_SPEED;
-    if (glfwGetKey(window, GLFW_KEY_9) == GLFW_PRESS) t.angleYW += ROTATE_SPEED;
-    if (glfwGetKey(window, GLFW_KEY_0) == GLFW_PRESS) t.angleYW -= ROTATE_SPEED;
-    if (glfwGetKey(window, GLFW_KEY_MINUS) == GLFW_PRESS) t.angleZW += ROTATE_SPEED;
-    if (glfwGetKey(window, GLFW_KEY_EQUAL) == GLFW_PRESS) t.angleZW -= ROTATE_SPEED;
+    // Auto-rotate remaining planes that don't have key bindings
+    for (int i = 6; i < t.planeCount(); i++) {
+        t.angles[i] += 0.003f * (1 + (i % 3));
+    }
 
-    if (glfwGetKey(window, GLFW_KEY_R) == GLFW_PRESS) t = Transform4D{};
+    if (glfwGetKey(window, GLFW_KEY_R) == GLFW_PRESS) {
+        std::fill(t.angles.begin(), t.angles.end(), 0.0f);
+        std::fill(t.translation.begin(), t.translation.end(), 0.0f);
+    }
 }
 
-int main() {
-    // Init GLFW
+struct Edge { int a, b; };
+
+static std::vector<Edge> generateEdges(const float* vertices, unsigned int vertexCount,
+                                        unsigned int dims, int fpv) {
+    std::vector<Edge> edges;
+    for (unsigned int a = 0; a < vertexCount; a++) {
+        for (unsigned int b = a + 1; b < vertexCount; b++) {
+            int diff = 0;
+            for (unsigned int d = 0; d < dims; d++) {
+                if (fabsf(vertices[a * fpv + d] - vertices[b * fpv + d]) > 0.001f)
+                    diff++;
+            }
+            if (diff == 1)
+                edges.push_back({(int)a, (int)b});
+        }
+    }
+    return edges;
+}
+
+int main(int argc, char* argv[]) {
     glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
     if (!glfwInit()) {
         std::cerr << "Failed to initialize GLFW" << std::endl;
@@ -171,7 +243,8 @@ int main() {
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
-    GLFWwindow* window = glfwCreateWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "4D Tesseract", nullptr, nullptr);
+    char titleBuf[64];
+    GLFWwindow* window = glfwCreateWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "Ducky", nullptr, nullptr);
     if (!window) {
         std::cerr << "Failed to create window" << std::endl;
         glfwTerminate();
@@ -189,64 +262,50 @@ int main() {
     int fbW = 0, fbH = 0;
     glEnable(GL_DEPTH_TEST);
 
-    // Load model
-    Model model = LoadModel("model.dky");
-    std::cout << "Loaded " << model.vertexCount << " vertices, " << model.indexCount << " indices" << std::endl;
+    const char* modelPath = argc > 1 ? argv[1] : "model.dky";
+    Model model = LoadModel(modelPath);
+    if (model.vertexCount == 0) {
+        std::cerr << "Failed to load model\n";
+        glfwTerminate();
+        return -1;
+    }
+    std::cout << "Loaded " << model.dimensions << "D model: "
+              << model.vertexCount << " vertices, " << model.indexCount << " indices" << std::endl;
 
-    // Assign each face a unique solid color (24 faces, 4 verts per face)
+    unsigned int dims = model.dimensions;
+    int fpv = dims + 3; // floats per vertex (N pos + 3 color)
+
+    // Assign face colors if model has no meaningful colors
+    // Color each face with a distinct HSL-based color
+    // Figure out faces by grouping 3 consecutive indices per triangle
     {
-        const float goldenRatio = 0.618033988749895f;
-        float faceColors[24][3];
-        for (int i = 0; i < 24; i++) {
-            float h = i * goldenRatio;
-            h = h - floorf(h);
-            float s = 0.85f;
-            float l = 0.45f + ((i / 8) % 3) * 0.2f;
-            hslToRgb(h, s, l, faceColors[i][0], faceColors[i][1], faceColors[i][2]);
-        }
-        for (int i = 0; i < 24; i++) {
-            for (int j = 0; j < 4; j++) {
-                int vi = (i * 4 + j) * 7;
-                model.vertices[vi + 4] = faceColors[i][0];
-                model.vertices[vi + 5] = faceColors[i][1];
-                model.vertices[vi + 6] = faceColors[i][2];
+        if (model.vertexCount > 0 && model.indexCount > 0) {
+            // Find unique faces by looking at triangles sharing indices
+            // Simple approach: color each vertex by its face index
+            unsigned int faces = model.indexCount / 3;
+            const float goldenRatio = 0.618033988749895f;
+            for (unsigned int f = 0; f < faces; f++) {
+                float h = f * goldenRatio;
+                h = h - floorf(h);
+                float s = 0.85f;
+                float l = 0.45f + ((f / 8) % 3) * 0.2f;
+                float r, g, b;
+                hslToRgb(h, s, l, r, g, b);
+                for (int j = 0; j < 3; j++) {
+                    int vi = model.indices[f * 3 + j];
+                    model.vertices[vi * fpv + dims] = r;
+                    model.vertices[vi * fpv + dims + 1] = g;
+                    model.vertices[vi * fpv + dims + 2] = b;
+                }
             }
         }
     }
 
-    // Generate tesseract wireframe edges (32 edges of the hypercube)
-    const int NUM_EDGE_VERTS = 16;
-    float edgeVerts[NUM_EDGE_VERTS][4];
-    int vi = 0;
-    for (int i = 0; i < 2; i++)
-        for (int j = 0; j < 2; j++)
-            for (int k = 0; k < 2; k++)
-                for (int l = 0; l < 2; l++) {
-                    edgeVerts[vi][0] = i ? 0.5f : -0.5f;
-                    edgeVerts[vi][1] = j ? 0.5f : -0.5f;
-                    edgeVerts[vi][2] = k ? 0.5f : -0.5f;
-                    edgeVerts[vi][3] = l ? 0.5f : -0.5f;
-                    vi++;
-                }
+    // Generate edges from mesh topology (connect vertices differing in 1 coordinate)
+    auto edges = generateEdges(model.vertices, model.vertexCount, dims, fpv);
+    std::cout << "Generated " << edges.size() << " edges" << std::endl;
 
-    int edgeList[32][2];
-    int ec = 0;
-    for (int a = 0; a < NUM_EDGE_VERTS; a++)
-        for (int b = a + 1; b < NUM_EDGE_VERTS; b++) {
-            int diff = 0;
-            for (int c = 0; c < 4; c++)
-                if (edgeVerts[a][c] != edgeVerts[b][c]) diff++;
-            if (diff == 1) { edgeList[ec][0] = a; edgeList[ec][1] = b; ec++; }
-        }
-
-    float edgeVertexData[32 * 2 * 4];
-    for (int i = 0; i < 32; i++)
-        for (int c = 0; c < 4; c++) {
-            edgeVertexData[i * 8 + c] = edgeVerts[edgeList[i][0]][c];
-            edgeVertexData[i * 8 + 4 + c] = edgeVerts[edgeList[i][1]][c];
-        }
-
-    // === Tesseract setup ===
+    // === Tesseract setup (3D rendering from CPU-projected data) ===
     GLuint tessVAO, tessVBO, tessEBO;
     glGenVertexArrays(1, &tessVAO);
     glGenBuffers(1, &tessVBO);
@@ -254,105 +313,87 @@ int main() {
 
     glBindVertexArray(tessVAO);
     glBindBuffer(GL_ARRAY_BUFFER, tessVBO);
-    glBufferData(GL_ARRAY_BUFFER, model.vertexCount * 7 * sizeof(float), model.vertices, GL_STATIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, model.vertexCount * 6 * sizeof(float), nullptr, GL_DYNAMIC_DRAW);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, tessEBO);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, model.indexCount * sizeof(unsigned int), model.indices, GL_DYNAMIC_DRAW);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, model.indexCount * sizeof(unsigned int), model.indices, GL_STATIC_DRAW);
 
-    glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 7 * sizeof(float), nullptr);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), nullptr);
     glEnableVertexAttribArray(0);
-    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 7 * sizeof(float), (void*)(4 * sizeof(float)));
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)(3 * sizeof(float)));
     glEnableVertexAttribArray(1);
 
     GLuint tessProgram = createShaderProgram("shaders/tesseract.vert", "shaders/tesseract.frag");
-    if (!tessProgram) {
-        glfwTerminate();
-        return -1;
-    }
-
-    TesseractUniforms tessUni;
-    tessUni.uRotXY = glGetUniformLocation(tessProgram, "uRotXY");
-    tessUni.uRotXZ = glGetUniformLocation(tessProgram, "uRotXZ");
-    tessUni.uRotYZ = glGetUniformLocation(tessProgram, "uRotYZ");
-    tessUni.uRotXW = glGetUniformLocation(tessProgram, "uRotXW");
-    tessUni.uRotYW = glGetUniformLocation(tessProgram, "uRotYW");
-    tessUni.uRotZW = glGetUniformLocation(tessProgram, "uRotZW");
-    tessUni.translation = glGetUniformLocation(tessProgram, "translation");
-    tessUni.uAspect = glGetUniformLocation(tessProgram, "uAspect");
+    if (!tessProgram) { glfwTerminate(); return -1; }
+    GLuint tessUAspect = glGetUniformLocation(tessProgram, "uAspect");
 
     // === Axes setup ===
     GLuint axesVAO, axesVBO;
     glGenVertexArrays(1, &axesVAO);
     glGenBuffers(1, &axesVBO);
 
-    float axesVertices[] = {
-        // X (red)
-        0,0,0,0, 1,0,0, AXIS_LENGTH,0,0,0, 1,0,0,
-        // Y (green)
-        0,0,0,0, 0,1,0, 0,AXIS_LENGTH,0,0, 0,1,0,
-        // Z (blue)
-        0,0,0,0, 0,0,1, 0,0,AXIS_LENGTH,0, 0,0,1,
-        // W (purple)
-        0,0,0,0, 0.5f,0,0.5f, 0,0,0,AXIS_LENGTH, 0.5f,0,0.5f,
-    };
+    // Generate axis data for N dimensions: each axis is a line from origin to a unit vector
+    // We'll dynamically regenerate this each frame since it goes through the same transform
+    {
+        float* axisData = new float[dims * 2 * 6]; // 2 vertices per axis * 6 floats (3 pos + 3 color)
+        for (unsigned int d = 0; d < dims; d++) {
+            float h = (float)d / (float)dims;
+            float r, g, b;
+            hslToRgb(h, 0.9f, 0.6f, r, g, b);
+            // Origin vertex
+            axisData[d * 12 + 0] = 0; axisData[d * 12 + 1] = 0; axisData[d * 12 + 2] = 0;
+            axisData[d * 12 + 3] = r; axisData[d * 12 + 4] = g; axisData[d * 12 + 5] = b;
+            // Axis tip vertex (unit vector along dimension d)
+            axisData[d * 12 + 6] = 0; axisData[d * 12 + 7] = 0; axisData[d * 12 + 8] = 0;
+            axisData[d * 12 + 9] = r; axisData[d * 12 + 10] = g; axisData[d * 12 + 11] = b;
+            // Set the actual axis direction - we'll transform it per frame
+            // Mark which dimension this is (stored in unused float)
+            axisData[d * 12 + 0 + d] = AXIS_LENGTH; // set the d-th component to AXIS_LENGTH for the tip
+        }
 
-    glBindVertexArray(axesVAO);
-    glBindBuffer(GL_ARRAY_BUFFER, axesVBO);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(axesVertices), axesVertices, GL_STATIC_DRAW);
-    glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 7 * sizeof(float), nullptr);
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 7 * sizeof(float), (void*)(4 * sizeof(float)));
-    glEnableVertexAttribArray(1);
+        glBindVertexArray(axesVAO);
+        glBindBuffer(GL_ARRAY_BUFFER, axesVBO);
+        glBufferData(GL_ARRAY_BUFFER, dims * 2 * 6 * sizeof(float), axisData, GL_DYNAMIC_DRAW);
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), nullptr);
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)(3 * sizeof(float)));
+        glEnableVertexAttribArray(1);
 
-    GLuint axesProgram = createShaderProgram("shaders/axes.vert", "shaders/axes.frag");
-    if (!axesProgram) {
-        glfwTerminate();
-        return -1;
+        delete[] axisData;
     }
 
-    AxesUniforms axesUni;
-    axesUni.uRotXY = glGetUniformLocation(axesProgram, "uRotXY");
-    axesUni.uRotXZ = glGetUniformLocation(axesProgram, "uRotXZ");
-    axesUni.uRotYZ = glGetUniformLocation(axesProgram, "uRotYZ");
-    axesUni.uRotXW = glGetUniformLocation(axesProgram, "uRotXW");
-    axesUni.uRotYW = glGetUniformLocation(axesProgram, "uRotYW");
-    axesUni.uRotZW = glGetUniformLocation(axesProgram, "uRotZW");
-    axesUni.uAspect = glGetUniformLocation(axesProgram, "uAspect");
+    GLuint axesProgram = createShaderProgram("shaders/axes.vert", "shaders/axes.frag");
+    if (!axesProgram) { glfwTerminate(); return -1; }
+    GLuint axesUAspect = glGetUniformLocation(axesProgram, "uAspect");
 
     // === Wireframe edges setup ===
     GLuint edgeVAO, edgeVBO;
     glGenVertexArrays(1, &edgeVAO);
     glGenBuffers(1, &edgeVBO);
+
     glBindVertexArray(edgeVAO);
     glBindBuffer(GL_ARRAY_BUFFER, edgeVBO);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(edgeVertexData), edgeVertexData, GL_STATIC_DRAW);
-    glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 4 * sizeof(float), nullptr);
+    glBufferData(GL_ARRAY_BUFFER, edges.size() * 2 * 3 * sizeof(float), nullptr, GL_DYNAMIC_DRAW);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), nullptr);
     glEnableVertexAttribArray(0);
 
     GLuint edgeProgram = createShaderProgram("shaders/edge.vert", "shaders/edge.frag");
     if (!edgeProgram) { glfwTerminate(); return -1; }
-
-    struct EdgeUniforms {
-        GLuint uRotXY, uRotXZ, uRotYZ, uRotXW, uRotYW, uRotZW, translation, uAspect;
-    } edgeUni;
-    edgeUni.uRotXY = glGetUniformLocation(edgeProgram, "uRotXY");
-    edgeUni.uRotXZ = glGetUniformLocation(edgeProgram, "uRotXZ");
-    edgeUni.uRotYZ = glGetUniformLocation(edgeProgram, "uRotYZ");
-    edgeUni.uRotXW = glGetUniformLocation(edgeProgram, "uRotXW");
-    edgeUni.uRotYW = glGetUniformLocation(edgeProgram, "uRotYW");
-    edgeUni.uRotZW = glGetUniformLocation(edgeProgram, "uRotZW");
-    edgeUni.translation = glGetUniformLocation(edgeProgram, "translation");
-    edgeUni.uAspect = glGetUniformLocation(edgeProgram, "uAspect");
+    GLuint edgeUAspect = glGetUniformLocation(edgeProgram, "uAspect");
 
     // === Text setup ===
     GLuint textProgram = createShaderProgram("shaders/text.vert", "shaders/text.frag");
-    if (!textProgram) {
-        glfwTerminate();
-        return -1;
-    }
+    if (!textProgram) { glfwTerminate(); return -1; }
 
-    const char* hintText = "Controls: WASD-move XY, QE-move Z, ZX-move W, 123456-rotate XY/XZ/YZ, 7890-/+ rotate XW/YW/ZW";
+    // Build controls text dynamically
+    std::string hintText = "Ducky: " + std::to_string(dims) + "D viewer";
+    hintText += "  |  Move: WASD=01 QE=2 ZX=3 TG=4 BH=5";
+    hintText += "  |  Rot: 12 34 56 78 90 -+";
+    hintText += "  |  R=reset";
+
     char textBuffer[20000];
-    int numQuads = stb_easy_font_print(10, 10, (char*)hintText, nullptr, textBuffer, sizeof(textBuffer));
+    std::vector<char> hintCopy(hintText.begin(), hintText.end());
+    hintCopy.push_back('\0');
+    int numQuads = stb_easy_font_print(10, 10, hintCopy.data(), nullptr, textBuffer, sizeof(textBuffer));
 
     GLuint textVAO, textVBO, textEBO;
     glGenVertexArrays(1, &textVAO);
@@ -366,7 +407,6 @@ int main() {
     glVertexAttribPointer(1, 4, GL_UNSIGNED_BYTE, GL_TRUE, 16, (void*)12);
     glEnableVertexAttribArray(1);
 
-    // Convert quads to triangles (2 triangles per quad)
     std::vector<unsigned int> textIndices(numQuads * 6);
     for (int i = 0; i < numQuads; i++) {
         int base = i * 4;
@@ -382,10 +422,13 @@ int main() {
 
     GLint textScreenSize = glGetUniformLocation(textProgram, "uScreenSize");
 
-    Transform4D transform;
+    TransformND transform;
+    transform.dims = dims;
+    transform.angles.resize(transform.planeCount(), 0.0f);
+    transform.translation.resize(dims, 0.0f);
 
-    // Pre-computed rotation cos/sin pairs
-    float rotXY[2], rotXZ[2], rotYZ[2], rotXW[2], rotYW[2], rotZW[2];
+    // Per-frame projection buffers
+    std::vector<float> projectedVerts(model.vertexCount * 6); // 3 pos + 3 color per vert
 
     // Render loop
     while (!glfwWindowShouldClose(window)) {
@@ -395,95 +438,117 @@ int main() {
         glViewport(0, 0, fbW, fbH);
         float aspect = (float)fbW / (float)fbH;
 
-        rotXY[0] = cosf(transform.angleXY); rotXY[1] = sinf(transform.angleXY);
-        rotXZ[0] = cosf(transform.angleXZ); rotXZ[1] = sinf(transform.angleXZ);
-        rotYZ[0] = cosf(transform.angleYZ); rotYZ[1] = sinf(transform.angleYZ);
-        rotXW[0] = cosf(transform.angleXW); rotXW[1] = sinf(transform.angleXW);
-        rotYW[0] = cosf(transform.angleYW); rotYW[1] = sinf(transform.angleYW);
-        rotZW[0] = cosf(transform.angleZW); rotZW[1] = sinf(transform.angleZW);
+        snprintf(titleBuf, sizeof(titleBuf), "Ducky - %uD (%u verts, %zu edges)",
+                 dims, model.vertexCount, edges.size());
+        glfwSetWindowTitle(window, titleBuf);
 
-        glClearColor(0.05f, 0.05f, 0.1f, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        // Process all vertices: rotate in N-D, project recursively to 3D
+        for (unsigned int i = 0; i < model.vertexCount; i++) {
+            float pos[16];
+            for (unsigned int d = 0; d < dims; d++)
+                pos[d] = model.vertices[i * fpv + d];
+            for (unsigned int d = 0; d < dims; d++)
+                pos[d] += transform.translation[d];
+            applyRotation(pos, transform);
+            projectTo3D(pos, &projectedVerts[i * 6], dims);
+            projectedVerts[i * 6 + 3] = model.vertices[i * fpv + dims];
+            projectedVerts[i * 6 + 4] = model.vertices[i * fpv + dims + 1];
+            projectedVerts[i * 6 + 5] = model.vertices[i * fpv + dims + 2];
+        }
 
-        // Draw tesseract
-        glUseProgram(tessProgram);
-        glUniform2fv(tessUni.uRotXY, 1, rotXY);
-        glUniform2fv(tessUni.uRotXZ, 1, rotXZ);
-        glUniform2fv(tessUni.uRotYZ, 1, rotYZ);
-        glUniform2fv(tessUni.uRotXW, 1, rotXW);
-        glUniform2fv(tessUni.uRotYW, 1, rotYW);
-        glUniform2fv(tessUni.uRotZW, 1, rotZW);
-        glUniform4f(tessUni.translation, transform.transX, transform.transY, transform.transZ, transform.transW);
-        glUniform1f(tessUni.uAspect, aspect);
-
-        // 4D depth sort: compute rotated W for each vertex, sort triangles back-to-front
+        // Depth sort triangles by average projected Z
         {
-            float rotW[96];
-            for (int i = 0; i < 96; i++) {
-                float x = model.vertices[i * 7];
-                float y = model.vertices[i * 7 + 1];
-                float z = model.vertices[i * 7 + 2];
-                float w = model.vertices[i * 7 + 3];
-                rotatePlane(x, y, transform.angleXY);
-                rotatePlane(x, z, transform.angleXZ);
-                rotatePlane(x, w, transform.angleXW);
-                rotatePlane(y, z, transform.angleYZ);
-                rotatePlane(y, w, transform.angleYW);
-                rotatePlane(z, w, transform.angleZW);
-                rotW[i] = w;
-            }
-
             struct TriDepth { int idx; float depth; };
-            TriDepth triDepths[48];
-            for (int i = 0; i < 48; i++) {
+            std::vector<TriDepth> triDepths(model.indexCount / 3);
+            for (unsigned int i = 0; i < model.indexCount / 3; i++) {
                 float sum = 0;
-                for (int j = 0; j < 3; j++)
-                    sum += rotW[model.indices[i * 3 + j]];
-                triDepths[i] = {i, sum / 3.0f};
+                for (int j = 0; j < 3; j++) {
+                    int vi = model.indices[i * 3 + j];
+                    sum += projectedVerts[vi * 6 + 2];
+                }
+                triDepths[i] = {(int)i, sum / 3.0f};
             }
-            std::sort(triDepths, triDepths + 48,
-                      [](auto& a, auto& b) { return a.depth < b.depth; });
+            std::sort(triDepths.begin(), triDepths.end(),
+                      [](auto& a, auto& b) { return a.depth > b.depth; });
 
-            unsigned int sorted[144];
-            for (int i = 0; i < 48; i++) {
+            std::vector<unsigned int> sorted(model.indexCount);
+            for (unsigned int i = 0; i < model.indexCount / 3; i++) {
                 int t = triDepths[i].idx;
                 sorted[i * 3 + 0] = model.indices[t * 3 + 0];
                 sorted[i * 3 + 1] = model.indices[t * 3 + 1];
                 sorted[i * 3 + 2] = model.indices[t * 3 + 2];
             }
-            glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, 0, sizeof(sorted), sorted);
+            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, tessEBO);
+            glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, 0, model.indexCount * sizeof(unsigned int), sorted.data());
         }
 
+        // Draw tesseract faces
+        glBindBuffer(GL_ARRAY_BUFFER, tessVBO);
+        glBufferSubData(GL_ARRAY_BUFFER, 0, model.vertexCount * 6 * sizeof(float), projectedVerts.data());
+
+        glClearColor(0.05f, 0.05f, 0.1f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+        glUseProgram(tessProgram);
+        glUniform1f(tessUAspect, aspect);
         glBindVertexArray(tessVAO);
         glDrawElements(GL_TRIANGLES, model.indexCount, GL_UNSIGNED_INT, nullptr);
 
-        // Draw axes
-        glUseProgram(axesProgram);
-        glUniform2fv(axesUni.uRotXY, 1, rotXY);
-        glUniform2fv(axesUni.uRotXZ, 1, rotXZ);
-        glUniform2fv(axesUni.uRotYZ, 1, rotYZ);
-        glUniform2fv(axesUni.uRotXW, 1, rotXW);
-        glUniform2fv(axesUni.uRotYW, 1, rotYW);
-        glUniform2fv(axesUni.uRotZW, 1, rotZW);
-        glUniform1f(axesUni.uAspect, aspect);
-        glBindVertexArray(axesVAO);
-        glDrawArrays(GL_LINES, 0, 8);
+        // Process and draw axes
+        {
+            float* axis3D = new float[dims * 2 * 6];
+            for (unsigned int d = 0; d < dims; d++) {
+                float h = (float)d / (float)dims;
+                float r, g, b;
+                hslToRgb(h, 0.9f, 0.6f, r, g, b);
 
-        // Draw white wireframe edges (on top, no depth test)
-        glDisable(GL_DEPTH_TEST);
-        glUseProgram(edgeProgram);
-        glUniform2fv(edgeUni.uRotXY, 1, rotXY);
-        glUniform2fv(edgeUni.uRotXZ, 1, rotXZ);
-        glUniform2fv(edgeUni.uRotYZ, 1, rotYZ);
-        glUniform2fv(edgeUni.uRotXW, 1, rotXW);
-        glUniform2fv(edgeUni.uRotYW, 1, rotYW);
-        glUniform2fv(edgeUni.uRotZW, 1, rotZW);
-        glUniform4f(edgeUni.translation, transform.transX, transform.transY, transform.transZ, transform.transW);
-        glUniform1f(edgeUni.uAspect, aspect);
-        glBindVertexArray(edgeVAO);
-        glDrawArrays(GL_LINES, 0, 64);
+                // Origin (0 in all dims)
+                float origin[16] = {0};
+                // Tip: AXIS_LENGTH in dimension d
+                float tip[16] = {0};
+                tip[d] = AXIS_LENGTH;
 
-        // Draw text (HUD, also without depth test)
+                applyRotation(origin, transform);
+                applyRotation(tip, transform);
+                projectTo3D(origin, &axis3D[d * 12], dims);
+                projectTo3D(tip, &axis3D[d * 12 + 6], dims);
+
+                axis3D[d * 12 + 3] = r; axis3D[d * 12 + 4] = g; axis3D[d * 12 + 5] = b;
+                axis3D[d * 12 + 9] = r; axis3D[d * 12 + 10] = g; axis3D[d * 12 + 11] = b;
+            }
+
+            glBindBuffer(GL_ARRAY_BUFFER, axesVBO);
+            glBufferSubData(GL_ARRAY_BUFFER, 0, dims * 2 * 6 * sizeof(float), axis3D);
+            glUseProgram(axesProgram);
+            glUniform1f(axesUAspect, aspect);
+            glBindVertexArray(axesVAO);
+            glDrawArrays(GL_LINES, 0, dims * 2);
+            delete[] axis3D;
+        }
+
+        // Draw wireframe edges
+        {
+            float* edge3D = new float[edges.size() * 2 * 3];
+            for (size_t i = 0; i < edges.size(); i++) {
+                edge3D[i * 6 + 0] = projectedVerts[edges[i].a * 6];
+                edge3D[i * 6 + 1] = projectedVerts[edges[i].a * 6 + 1];
+                edge3D[i * 6 + 2] = projectedVerts[edges[i].a * 6 + 2];
+                edge3D[i * 6 + 3] = projectedVerts[edges[i].b * 6];
+                edge3D[i * 6 + 4] = projectedVerts[edges[i].b * 6 + 1];
+                edge3D[i * 6 + 5] = projectedVerts[edges[i].b * 6 + 2];
+            }
+            glBindBuffer(GL_ARRAY_BUFFER, edgeVBO);
+            glBufferSubData(GL_ARRAY_BUFFER, 0, edges.size() * 2 * 3 * sizeof(float), edge3D);
+
+            glDisable(GL_DEPTH_TEST);
+            glUseProgram(edgeProgram);
+            glUniform1f(edgeUAspect, aspect);
+            glBindVertexArray(edgeVAO);
+            glDrawArrays(GL_LINES, 0, edges.size() * 2);
+            delete[] edge3D;
+        }
+
+        // Draw text
         glUseProgram(textProgram);
         glUniform2f(textScreenSize, fbW, fbH);
         glBindVertexArray(textVAO);

@@ -1,15 +1,22 @@
 #include <cstring>
 #include <iostream>
+#include <cstdlib>
 
 struct Model {
-    float* vertices;           // x, y, z, w, u, v, wt per vertex
+    float* vertices;           // N + 3 values per vertex (N pos + 3 color)
     unsigned int vertexCount;
-    unsigned int* indices;      // face indices
+    unsigned int* indices;
     unsigned int indexCount;
+    unsigned int dimensions;   // number of spatial dimensions
 };
 
+static bool isEmptyOrComment(const char* line) {
+    return line[0] == '\0' || line[0] == '\n' || line[0] == '\r' ||
+           (line[0] == '/' && line[1] == '/');
+}
+
 Model LoadModel(const char* path) {
-    Model model = {nullptr, 0, nullptr, 0};
+    Model model = {nullptr, 0, nullptr, 0, 4};
 
     FILE* file = fopen(path, "r");
     if (!file) {
@@ -17,43 +24,72 @@ Model LoadModel(const char* path) {
         return model;
     }
 
-    // First pass: count vertices and indices
-    char line[256];
-    int section = 0;
+    char line[1024];
+    unsigned int dims = 4;
+    bool section = false; // false = vertices, true = faces
     unsigned int vertCount = 0, idxCount = 0;
+    bool dimsRead = false;
+
+    // First pass: read dims, count vertices and indices
     while (fgets(line, sizeof(line), file)) {
-        if (line[0] == '/' && line[1] == '/') continue;
-        if (line[0] == '\n' || line[0] == '\r' || line[0] == '\0') continue;
-        if (line[0] == 'f' && line[1] == 'a') { section = 1; continue; }
-        if (section == 0) vertCount++;
+        if (isEmptyOrComment(line)) continue;
+
+        if (!dimsRead) {
+            unsigned int d;
+            if (sscanf(line, " dims %u", &d) >= 1 || sscanf(line, "dims %u", &d) >= 1) {
+                if (d >= 3) dims = d;
+                dimsRead = true;
+                continue;
+            }
+            dimsRead = true;
+        }
+
+        if (line[0] == 'f' && line[1] == 'a') { section = true; continue; }
+        if (!section) vertCount++;
         else idxCount += 3;
     }
 
+    model.dimensions = dims;
+    int fpv = dims + 3;
     model.vertexCount = vertCount;
     model.indexCount = idxCount;
-    model.vertices = new float[vertCount * 7];
+    model.vertices = new float[vertCount * fpv];
     model.indices = new unsigned int[idxCount];
 
     // Second pass: read data
     rewind(file);
-    section = 0;
+    section = false;
     unsigned int vi = 0, ii = 0;
-    while (fgets(line, sizeof(line), file)) {
-        if (line[0] == '/' && line[1] == '/') continue;
-        if (line[0] == '\n' || line[0] == '\r' || line[0] == '\0') continue;
-        if (line[0] == 'f' && line[1] == 'a') { section = 1; continue; }
+    dimsRead = false;
 
-        if (section == 0) {
-            float x, y, z, w, u, v, wt;
-            if (sscanf(line, "%f %f %f %f %f %f %f", &x, &y, &z, &w, &u, &v, &wt) == 7) {
-                int offset = vi * 7;
-                model.vertices[offset] = x;
-                model.vertices[offset + 1] = y;
-                model.vertices[offset + 2] = z;
-                model.vertices[offset + 3] = w;
-                model.vertices[offset + 4] = u;
-                model.vertices[offset + 5] = v;
-                model.vertices[offset + 6] = wt;
+    while (fgets(line, sizeof(line), file)) {
+        if (isEmptyOrComment(line)) continue;
+
+        if (!dimsRead) {
+            unsigned int d;
+            if (sscanf(line, " dims %u", &d) >= 1 || sscanf(line, "dims %u", &d) >= 1) {
+                dimsRead = true;
+                continue;
+            }
+            dimsRead = true;
+        }
+
+        if (line[0] == 'f' && line[1] == 'a') { section = true; continue; }
+
+        if (!section) {
+            float vals[32];
+            int parsed = 0;
+            const char* ptr = line;
+            while (parsed < fpv) {
+                char* end;
+                vals[parsed] = strtof(ptr, &end);
+                if (end == ptr) break;
+                ptr = end;
+                parsed++;
+            }
+            if (parsed == fpv) {
+                for (int i = 0; i < fpv; i++)
+                    model.vertices[vi * fpv + i] = vals[i];
                 vi++;
             }
         } else {

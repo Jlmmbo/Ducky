@@ -1,6 +1,7 @@
-// Tesseract with 3D UVW mapping
-// Each face is 2 triangles with 3D texcoords
-// Format: x y z w u v w
+dims 4
+// Tesseract with vertex colors
+// Format: x y z w r g b
+// Face colors assigned programmatically via HSL
 
 // Face 0: Front of cube 1 (z = -0.5, w = -0.5)
  -0.5 -0.5 -0.5 -0.5 0.0 0.0 0.0
