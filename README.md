@@ -13,12 +13,16 @@ Ducky visualizes N-dimensional objects (3D, 4D, 5D, ...) by recursively projecti
 ## Features
 
 - **N-D Perspective Projection**: Recursively projects N-D geometry down to 3D, then to 2D screen space
-- **N-D Rotation**: All N×(N-1)/2 rotation planes supported (first 6 have key bindings, rest auto-rotate)
-- **N-D Translation**: Move through all N dimensions
+- **N-D Rotation**: All N×(N-1)/2 rotation planes controllable via on-screen slider panel
+- **Per-Plane Auto-Rotate**: Toggle auto-rotation on/off for each individual rotation plane (green A / dark M)
+- **N-D Translation**: Move through all N dimensions via keyboard
 - **Face-Colored Rendering**: Distinct HSL-based colors per face
 - **Coordinate Axes**: Visualize all N axes with distinct colors
-- **Wireframe Overlay**: Auto-generated edges from mesh topology
+- **Wireframe Overlay**: Auto-generated edges from mesh topology (hypercube-aware, falls back to triangle edges)
+- **Slider Panel**: Left-side draggable angle sliders for all rotation planes
+- **Frame-Rate Independence**: Auto-rotation speed uses delta-time
 - **Custom Model Format**: Simple `.dky` format with `dims N` header for defining N-D meshes
+- **Edge Fallback**: Works with both hypercube and arbitrary mesh models
 - **Cross-Platform**: Builds on Linux and Windows (via cross-compilation)
 
 ## Building
@@ -33,34 +37,38 @@ Ducky visualizes N-dimensional objects (3D, 4D, 5D, ...) by recursively projecti
 ### Linux
 
 ```bash
+sudo apt install libglfw3-dev  # Debian/Ubuntu
 mkdir build && cd build
 cmake ..
 make
-./ducky
+./ducky [model.dky]
 ```
 
-### Windows (Cross-compile from Linux)
+### Windows (Native)
 
-```bash
-mkdir build && cd build
-cmake -DCMAKE_TOOLCHAIN_FILE=/usr/share/mingw-w64/cmake/toolchain.cmake ..
-make
-wine ducky.exe
+Requires CMake and a C++17 compiler. GLFW is fetched automatically.
+
+#### Visual Studio (MSVC)
+
+```powershell
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --config Release
+build\Release\ducky.exe model.dky
 ```
 
-Or use the manual compile command:
+#### MinGW (on Windows)
 
-```bash
-x86_64-w64-mingw32-g++ src/glad.c src/main.cpp \
-  -Iinclude \
-  -Lexternal/glfw/build-win/src \
-  -lglfw3 -lopengl32 -lgdi32 -luser32 -lshell32 \
-  -o bin/ducky.exe
+```powershell
+cmake -B build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+build\ducky.exe model.dky
 ```
 
 ## Controls
 
-### Translation (N-D Movement)
+### Keyboard
+
+#### Translation (N-D Movement)
 | Key | Action |
 |-----|--------|
 | `A` / `D` | Move in dimension 0 (X) |
@@ -70,7 +78,7 @@ x86_64-w64-mingw32-g++ src/glad.c src/main.cpp \
 | `T` / `G` | Move in dimension 4 |
 | `B` / `H` | Move in dimension 5 |
 
-### Rotation (N-D Planes)
+#### Rotation (N-D Planes)
 | Key | Action |
 |-----|--------|
 | `1` / `2` | Rotate in plane 0-1 |
@@ -80,12 +88,18 @@ x86_64-w64-mingw32-g++ src/glad.c src/main.cpp \
 | `9` / `0` | Rotate in plane 1-3 |
 | `-` / `=` | Rotate in plane 2-3 |
 
-Planes beyond the first 6 auto-rotate at a slow pace.
-
-### Other
+#### Other
 | Key | Action |
 |-----|--------|
-| `R` | Reset all rotations and translations |
+| `R` | Reset all rotations, translations, and auto-rotate toggles |
+
+### Mouse (Slider Panel)
+
+A left-side panel provides draggable sliders for every rotation plane:
+
+- **Drag the track** to set an angle in [–π, π)
+- **Click the toggle square** to toggle per-plane auto-rotation (green `A` = on, dark `M` = off)
+- Ctrl+R resets all angles and toggles
 
 ## .dky Model Format
 
@@ -120,44 +134,38 @@ face
 
 ```
 Ducky/
-├── src/              # Source files
-│   ├── main.cpp      # Main application & rendering loop
-│   ├── main.hpp      # Model loading (LoadModel)
-│   ├── dimensions.hpp # N-D coordinate math (unused in current build)
-│   ├── 4d.hpp        # 4D vector math (unused in current build)
-│   ├── 3d.hpp        # 3D utilities (unused in current build)
-│   ├── 2d.hpp        # 2D utilities (unused in current build)
-│   ├── camera.hpp    # Camera controls (unused in current build)
-│   ├── render.hpp    # Rendering helpers (unused in current build)
-│   ├── glad.c        # OpenGL loader
-│   ├── stb_image.h   # Texture loading
-│   └── stb_easy_font.h # Text rendering
-├── shaders/          # GLSL shaders
-│   ├── tesseract.vert # 3D→2D projection vertex shader
-│   ├── tesseract.frag # Flat-colored fragment shader
-│   ├── axes.vert     # Coordinate axes vertex shader
-│   ├── axes.frag
-│   ├── edge.vert     # Wireframe edge vertex shader
-│   ├── edge.frag
-│   ├── text.vert     # On-screen text shader
-│   └── text.frag
-├── include/          # Headers (GLFW, GLAD, KHR)
-├── bin/              # Compiled binaries
-├── model.dky         # Default 4D model (tesseract)
-├── 00001.png         # Default texture
-└── CMakeLists.txt    # Build configuration
+├── cmake/
+│   └── mingw-toolchain.cmake   # MinGW cross-compilation toolchain
+├── src/                        # Source files
+│   ├── main.cpp                # Main application & rendering loop
+│   ├── main.hpp                # Model loading (LoadModel)
+│   ├── glad.c                  # OpenGL loader
+│   ├── stb_image.h             # Texture loading
+│   └── stb_easy_font.h         # Bitmap font rendering
+├── shaders/                    # GLSL shaders
+│   ├── tesseract.vert/.frag    # 3D→2D projection vertex shader
+│   ├── axes.vert/.frag         # Coordinate axes
+│   ├── edge.vert/.frag         # Wireframe edges
+│   └── text.vert/.frag         # On-screen text
+├── include/                    # Headers (GLFW, GLAD, KHR)
+├── bin/                        # Compiled binaries
+├── model.dky                   # Default 4D model (tesseract, 96 verts)
+├── model_5d.dky                # 5D hypercube (penteract, 320 verts)
+├── BUGS.md                     # Known bugs and optimization notes
+├── CMakeLists.txt              # Build configuration
+└── README.md                   # This file
 ```
 
 ## Dependencies
 
-- **GLFW 3.4** - Window management & input (fetched via FetchContent for Windows)
-- **GLAD** - OpenGL function loader (included in src/)
-- **stb_image** - Texture loading (included in src/)
-- **stb_easy_font** - Bitmap font rendering (included in src/)
+- **GLFW 3.4** — Window management & input (fetched via FetchContent for Windows)
+- **GLAD** — OpenGL function loader (included in src/)
+- **stb_image** — Texture loading (included in src/)
+- **stb_easy_font** — Bitmap font rendering (included in src/)
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) for details
+MIT License — see [LICENSE](LICENSE) for details
 
 ## Author
 
