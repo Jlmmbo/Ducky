@@ -20,11 +20,12 @@ constexpr float MOVE_SPEED = 0.02f;
 constexpr float ROTATE_SPEED = 0.02f;
 constexpr float AXIS_LENGTH = 1.5f;
 
-constexpr float PANEL_WIDTH = 280.0f;
+constexpr float PANEL_WIDTH = 290.0f;
 constexpr float SLIDER_HEIGHT = 28.0f;
-constexpr float LABEL_WIDTH = 45.0f;
-constexpr float VALUE_WIDTH = 60.0f;
-constexpr float PAD = 8.0f;
+constexpr float TOGGLE_SIZE = 14.0f;
+constexpr float LABEL_WIDTH = 36.0f;
+constexpr float VALUE_WIDTH = 55.0f;
+constexpr float PAD = 6.0f;
 
 constexpr float PI = 3.141592653589793f;
 
@@ -50,6 +51,7 @@ void main() {
 struct TransformND {
     std::vector<float> angles;
     std::vector<float> translation;
+    std::vector<bool> autoRotate;
     unsigned int dims;
 
     int planeCount() const { return dims * (dims - 1) / 2; }
@@ -257,13 +259,10 @@ static void processInput(GLFWwindow* window, TransformND& t) {
         if (glfwGetKey(window, GLFW_KEY_EQUAL) == GLFW_PRESS) t.angles[5] -= ROTATE_SPEED;
     }
 
-    for (int i = 6; i < t.planeCount(); i++) {
-        t.angles[i] += 0.003f * (1 + (i % 3));
-    }
-
     if (glfwGetKey(window, GLFW_KEY_R) == GLFW_PRESS) {
         std::fill(t.angles.begin(), t.angles.end(), 0.0f);
         std::fill(t.translation.begin(), t.translation.end(), 0.0f);
+        std::fill(t.autoRotate.begin(), t.autoRotate.end(), false);
     }
 }
 
@@ -532,6 +531,7 @@ int main(int argc, char* argv[]) {
     TransformND transform;
     transform.dims = dims;
     transform.angles.resize(transform.planeCount(), 0.0f);
+    transform.autoRotate.resize(transform.planeCount(), false);
     transform.translation.resize(dims, 0.0f);
 
     std::vector<float> projectedVerts(model.vertexCount * 6);
@@ -557,6 +557,16 @@ int main(int argc, char* argv[]) {
 
         processInput(window, transform);
 
+        // Per-plane auto-rotation
+        for (int i = 0; i < transform.planeCount(); i++) {
+            if (transform.autoRotate[i])
+                transform.angles[i] += 0.003f * (1 + (i % 3));
+        }
+
+        // Wrap all angles to [-PI, PI)
+        for (int i = 0; i < transform.planeCount(); i++)
+            transform.angles[i] = fmodf(transform.angles[i] + PI, 2.0f * PI) - PI;
+
         glfwGetFramebufferSize(window, &fbW, &fbH);
         glViewport(0, 0, fbW, fbH);
         float aspect = (float)fbW / (float)fbH;
@@ -570,9 +580,24 @@ int main(int argc, char* argv[]) {
             int nSliders = transform.planeCount();
             float panelTop = 10.0f;
             float panelLeft = 10.0f;
-            float trackX = panelLeft + LABEL_WIDTH + PAD;
-            float trackW = PANEL_WIDTH - LABEL_WIDTH - VALUE_WIDTH - PAD * 3;
             float titleH = 24.0f;
+            float toggleX = panelLeft + PAD;
+            float labelX = toggleX + TOGGLE_SIZE + PAD;
+            float trackX = labelX + LABEL_WIDTH + PAD;
+            float trackW = PANEL_WIDTH - (trackX - panelLeft) - VALUE_WIDTH - PAD;
+
+            // Toggle click
+            if (mouse.leftPressed) {
+                for (int i = 0; i < nSliders; i++) {
+                    float rowY = panelTop + PAD + titleH + PAD + i * SLIDER_HEIGHT;
+                    float tglY = rowY + (SLIDER_HEIGHT - TOGGLE_SIZE) / 2;
+                    if (mouse.x >= toggleX && mouse.x <= toggleX + TOGGLE_SIZE &&
+                        mouse.y >= tglY && mouse.y <= tglY + TOGGLE_SIZE) {
+                        transform.autoRotate[i] = !transform.autoRotate[i];
+                        break;
+                    }
+                }
+            }
 
             if (mouse.leftPressed) {
                 dragSlider = -1;
@@ -602,10 +627,8 @@ int main(int argc, char* argv[]) {
             for (int i = 0; i < nSliders; i++) {
                 float rowY = panelTop + PAD + titleH + PAD + i * SLIDER_HEIGHT;
                 if (mouse.x >= trackX && mouse.x <= trackX + trackW &&
-                    mouse.y >= rowY && mouse.y <= rowY + SLIDER_HEIGHT) {
+                    mouse.y >= rowY && mouse.y <= rowY + SLIDER_HEIGHT)
                     hoverSlider = i;
-                    break;
-                }
             }
         }
 
@@ -735,8 +758,10 @@ int main(int argc, char* argv[]) {
         char titleStr[64];
         snprintf(titleStr, sizeof(titleStr), "%uD Rotations", dims);
 
-        float trackX = panelLeft + LABEL_WIDTH + PAD;
-        float trackW = PANEL_WIDTH - LABEL_WIDTH - VALUE_WIDTH - PAD * 3;
+        float toggleX = panelLeft + PAD;
+        float labelX = toggleX + TOGGLE_SIZE + PAD;
+        float trackX = labelX + LABEL_WIDTH + PAD;
+        float trackW = PANEL_WIDTH - (trackX - panelLeft) - VALUE_WIDTH - PAD;
 
         // Draw each slider
         char label[16];
@@ -744,12 +769,25 @@ int main(int argc, char* argv[]) {
         for (int i = 0; i < nSliders; i++) {
             float rowY = panelTop + PAD + titleH + PAD + i * SLIDER_HEIGHT;
 
+            // Toggle button
+            bool autoOn = transform.autoRotate[i];
+            drawRect(uiProgram, uiVAO, uiVBO,
+                     toggleX, rowY + (SLIDER_HEIGHT - TOGGLE_SIZE) / 2,
+                     TOGGLE_SIZE, TOGGLE_SIZE,
+                     autoOn ? 0.2f : 0.15f, autoOn ? 0.7f : 0.15f, autoOn ? 0.2f : 0.2f, 0.9f,
+                     (float)fbW, (float)fbH);
+            float tglY = rowY + (SLIDER_HEIGHT - TOGGLE_SIZE) / 2;
+            char toggleLabel[2] = {autoOn ? 'A' : 'M', '\0'};
+            drawTextAt(dtVAO, dtVBO, dtEBO, textProgram,
+                       toggleX + 4, tglY + 3, toggleLabel,
+                       (float)fbW, (float)fbH, dtIndices.data(), TEXT_MAX_QUADS);
+
             // Label
             int pi = 0;
             int ai = -1, aj = -1;
             for (int a = 0; a < (int)dims && pi <= i; a++)
                 for (int b = a + 1; b < (int)dims && pi <= i; b++, pi++)
-                    if (pi - 1 == i) { ai = a; aj = b; }
+                    if (pi == i) { ai = a; aj = b; }
             snprintf(label, sizeof(label), "(%d,%d)", ai, aj);
 
             // Track background
@@ -771,7 +809,7 @@ int main(int argc, char* argv[]) {
                        trackX + trackW + PAD, rowY, valueStr,
                        (float)fbW, (float)fbH, dtIndices.data(), TEXT_MAX_QUADS);
             drawTextAt(dtVAO, dtVBO, dtEBO, textProgram,
-                       panelLeft + PAD, rowY, label,
+                       labelX, rowY, label,
                        (float)fbW, (float)fbH, dtIndices.data(), TEXT_MAX_QUADS);
         }
 
