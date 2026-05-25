@@ -112,7 +112,7 @@ static void applyRotation(float* pos, const TransformND& t) {
 }
 
 static void projectTo3D(const float* in, float* out, int dims) {
-    float tmp[16];
+    float tmp[64];
     for (int i = 0; i < dims; i++) tmp[i] = in[i];
 
     for (int d = dims - 1; d >= 3; d--) {
@@ -267,7 +267,9 @@ static void processInput(GLFWwindow* window, TransformND& t) {
 }
 
 static std::vector<Edge> generateEdges(const float* vertices, unsigned int vertexCount,
-                                        unsigned int dims, int fpv) {
+                                        unsigned int dims, int fpv,
+                                        const unsigned int* indices, unsigned int indexCount) {
+    // Primary: coordinate-differencing (works for hypercubes)
     std::vector<Edge> edges;
     for (unsigned int a = 0; a < vertexCount; a++) {
         for (unsigned int b = a + 1; b < vertexCount; b++) {
@@ -280,6 +282,29 @@ static std::vector<Edge> generateEdges(const float* vertices, unsigned int verte
                 edges.push_back({(int)a, (int)b});
         }
     }
+
+    if (!edges.empty())
+        return edges;
+
+    // Fallback: generate edges from triangle indices, deduplicated
+    // This works for arbitrary meshes (may include quad diagonals)
+    for (unsigned int t = 0; t < indexCount / 3; t++) {
+        unsigned int i0 = indices[t * 3];
+        unsigned int i1 = indices[t * 3 + 1];
+        unsigned int i2 = indices[t * 3 + 2];
+
+        auto addEdge = [&](unsigned int a, unsigned int b) {
+            if (a == b) return;
+            for (auto& e : edges)
+                if ((e.a == (int)a && e.b == (int)b) || (e.a == (int)b && e.b == (int)a))
+                    return;
+            edges.push_back({(int)a, (int)b});
+        };
+        addEdge(i0, i1);
+        addEdge(i1, i2);
+        addEdge(i2, i0);
+    }
+
     return edges;
 }
 
@@ -317,7 +342,9 @@ static int drawTextAt(GLuint vao, GLuint vbo, GLuint ebo, GLuint program,
 }
 
 int main(int argc, char* argv[]) {
+#ifndef _WIN32
     glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
+#endif
     if (!glfwInit()) {
         std::cerr << "Failed to initialize GLFW" << std::endl;
         return -1;
@@ -381,7 +408,8 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    auto edges = generateEdges(model.vertices, model.vertexCount, dims, fpv);
+    auto edges = generateEdges(model.vertices, model.vertexCount, dims, fpv,
+                                model.indices, model.indexCount);
     std::cout << "Generated " << edges.size() << " edges" << std::endl;
 
     // === 3D scene rendering setup ===
@@ -420,7 +448,7 @@ int main(int argc, char* argv[]) {
             axisData[d * 12 + 3] = r; axisData[d * 12 + 4] = g; axisData[d * 12 + 5] = b;
             axisData[d * 12 + 6] = 0; axisData[d * 12 + 7] = 0; axisData[d * 12 + 8] = 0;
             axisData[d * 12 + 9] = r; axisData[d * 12 + 10] = g; axisData[d * 12 + 11] = b;
-            axisData[d * 12 + 0 + d] = AXIS_LENGTH;
+
         }
 
         glBindVertexArray(axesVAO);
@@ -432,6 +460,13 @@ int main(int argc, char* argv[]) {
         glEnableVertexAttribArray(1);
 
         delete[] axisData;
+    }
+
+    // Pre-computed axis colors (never change per frame)
+    std::vector<float> axisR(dims), axisG(dims), axisB(dims);
+    for (unsigned int d = 0; d < dims; d++) {
+        float h = (float)d / (float)dims;
+        hslToRgb(h, 0.9f, 0.6f, axisR[d], axisG[d], axisB[d]);
     }
 
     GLuint axesProgram = createShaderProgram("shaders/axes.vert", "shaders/axes.frag");
@@ -541,6 +576,17 @@ int main(int argc, char* argv[]) {
     int dragSlider = -1;
     int hoverSlider = -1;
 
+    // Reusable buffers (persistent across frames)
+    std::vector<float> axis3D(dims * 2 * 6);
+    std::vector<float> edge3D(edges.size() * 2 * 3);
+    struct TriDepth { int idx; float depth; };
+    std::vector<TriDepth> triDepths;
+    triDepths.reserve(model.indexCount / 3 + 1);
+    std::vector<unsigned int> sorted;
+    sorted.reserve(model.indexCount + 3);
+
+    double lastTime = glfwGetTime();
+
     // Render loop
     while (!glfwWindowShouldClose(window)) {
         // Mouse state
@@ -557,10 +603,15 @@ int main(int argc, char* argv[]) {
 
         processInput(window, transform);
 
-        // Per-plane auto-rotation
-        for (int i = 0; i < transform.planeCount(); i++) {
-            if (transform.autoRotate[i])
-                transform.angles[i] += 0.003f * (1 + (i % 3));
+        // Per-plane auto-rotation (frame-rate independent)
+        {
+            double now = glfwGetTime();
+            float dt = (float)(now - lastTime);
+            lastTime = now;
+            for (int i = 0; i < transform.planeCount(); i++) {
+                if (transform.autoRotate[i])
+                    transform.angles[i] += dt * 0.5f * (1 + (i % 3));
+            }
         }
 
         // Wrap all angles to [-PI, PI)
@@ -646,11 +697,11 @@ int main(int argc, char* argv[]) {
             projectedVerts[i * 6 + 5] = model.vertices[i * fpv + dims + 2];
         }
 
-        // Depth sort
+        // Depth sort (reused buffers)
         {
-            struct TriDepth { int idx; float depth; };
-            std::vector<TriDepth> triDepths(model.indexCount / 3);
-            for (unsigned int i = 0; i < model.indexCount / 3; i++) {
+            unsigned int numTri = model.indexCount / 3;
+            triDepths.resize(numTri);
+            for (unsigned int i = 0; i < numTri; i++) {
                 float sum = 0;
                 for (int j = 0; j < 3; j++) {
                     int vi = model.indices[i * 3 + j];
@@ -661,8 +712,8 @@ int main(int argc, char* argv[]) {
             std::sort(triDepths.begin(), triDepths.end(),
                       [](auto& a, auto& b) { return a.depth > b.depth; });
 
-            std::vector<unsigned int> sorted(model.indexCount);
-            for (unsigned int i = 0; i < model.indexCount / 3; i++) {
+            sorted.resize(model.indexCount);
+            for (unsigned int i = 0; i < numTri; i++) {
                 int t = triDepths[i].idx;
                 sorted[i * 3 + 0] = model.indices[t * 3 + 0];
                 sorted[i * 3 + 1] = model.indices[t * 3 + 1];
@@ -685,35 +736,29 @@ int main(int argc, char* argv[]) {
         glBindVertexArray(tessVAO);
         glDrawElements(GL_TRIANGLES, model.indexCount, GL_UNSIGNED_INT, nullptr);
 
-        // Draw axes
+        // Draw axes (reused buffer, pre-computed colors)
         {
-            float* axis3D = new float[dims * 2 * 6];
             for (unsigned int d = 0; d < dims; d++) {
-                float h = (float)d / (float)dims;
-                float r, g, b;
-                hslToRgb(h, 0.9f, 0.6f, r, g, b);
-                float origin[16] = {0};
-                float tip[16] = {0};
+                float origin[64] = {0};
+                float tip[64] = {0};
                 tip[d] = AXIS_LENGTH;
                 applyRotation(origin, transform);
                 applyRotation(tip, transform);
                 projectTo3D(origin, &axis3D[d * 12], dims);
                 projectTo3D(tip, &axis3D[d * 12 + 6], dims);
-                axis3D[d * 12 + 3] = r; axis3D[d * 12 + 4] = g; axis3D[d * 12 + 5] = b;
-                axis3D[d * 12 + 9] = r; axis3D[d * 12 + 10] = g; axis3D[d * 12 + 11] = b;
+                axis3D[d * 12 + 3] = axisR[d]; axis3D[d * 12 + 4] = axisG[d]; axis3D[d * 12 + 5] = axisB[d];
+                axis3D[d * 12 + 9] = axisR[d]; axis3D[d * 12 + 10] = axisG[d]; axis3D[d * 12 + 11] = axisB[d];
             }
             glBindBuffer(GL_ARRAY_BUFFER, axesVBO);
-            glBufferSubData(GL_ARRAY_BUFFER, 0, dims * 2 * 6 * sizeof(float), axis3D);
+            glBufferSubData(GL_ARRAY_BUFFER, 0, dims * 2 * 6 * sizeof(float), axis3D.data());
             glUseProgram(axesProgram);
             glUniform1f(axesUAspect, aspect);
             glBindVertexArray(axesVAO);
             glDrawArrays(GL_LINES, 0, dims * 2);
-            delete[] axis3D;
         }
 
-        // Draw wireframe edges
+        // Draw wireframe edges (reused buffer)
         {
-            float* edge3D = new float[edges.size() * 2 * 3];
             for (size_t i = 0; i < edges.size(); i++) {
                 edge3D[i * 6 + 0] = projectedVerts[edges[i].a * 6];
                 edge3D[i * 6 + 1] = projectedVerts[edges[i].a * 6 + 1];
@@ -723,14 +768,13 @@ int main(int argc, char* argv[]) {
                 edge3D[i * 6 + 5] = projectedVerts[edges[i].b * 6 + 2];
             }
             glBindBuffer(GL_ARRAY_BUFFER, edgeVBO);
-            glBufferSubData(GL_ARRAY_BUFFER, 0, edges.size() * 2 * 3 * sizeof(float), edge3D);
+            glBufferSubData(GL_ARRAY_BUFFER, 0, edges.size() * 2 * 3 * sizeof(float), edge3D.data());
 
             glDisable(GL_DEPTH_TEST);
             glUseProgram(edgeProgram);
             glUniform1f(edgeUAspect, aspect);
             glBindVertexArray(edgeVAO);
             glDrawArrays(GL_LINES, 0, edges.size() * 2);
-            delete[] edge3D;
         }
 
         // === UI overlay (no depth test) ===
@@ -820,9 +864,7 @@ int main(int argc, char* argv[]) {
 
         // HUD text (top-right area)
         {
-            std::vector<char> hudText(hintText.begin(), hintText.end());
-            hudText.push_back('\0');
-            hudNumQuads = stb_easy_font_print(PANEL_WIDTH + 20, 12, hudText.data(),
+            hudNumQuads = stb_easy_font_print(PANEL_WIDTH + 20, 12, (char*)hintText.c_str(),
                                                nullptr, textBuffer, sizeof(textBuffer));
             glUseProgram(textProgram);
             glUniform2f(textScreenSize, (float)fbW, (float)fbH);
