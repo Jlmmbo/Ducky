@@ -149,36 +149,27 @@ static void projectOrthographic(const float* in, float* out, int dims) {
 }
 
 static void projectStereographic(const float* in, float* out, int dims, float focalLength) {
-    float radius = 0.0f;
-    for (int i = 0; i < dims; i++)
-        radius += in[i] * in[i];
-    radius = sqrtf(radius);
-    float w = dims > 3 ? in[3] : 0.0f;
-    float denom = focalLength * 2.0f - w;
-    if (fabsf(denom) < 0.001f) denom = 0.001f;
-    float scale = focalLength / denom;
-    out[0] = in[0] * scale;
-    out[1] = in[1] * scale;
-    out[2] = (dims > 2 ? in[2] : 0.0f) * scale;
-
-    float* tmp = (float*)alloca(dims * sizeof(float));
+    float tmp[128];
     for (int i = 0; i < dims; i++) tmp[i] = in[i];
+
+    // Project dims 5+ down to 4D using perspective
     for (int d = dims - 1; d >= 4; d--) {
-        float dist = (float)(d - 1) * focalLength;
+        float dist = (float)d * focalLength;
         float depth = dist - tmp[d];
         float s = depth > 0.001f ? dist / depth : 10.0f;
         for (int c = 0; c < d; c++)
             tmp[c] *= s;
     }
-    if (dims > 4) {
-        float w2 = tmp[3];
-        float denom2 = focalLength * 2.0f - w2;
-        if (fabsf(denom2) < 0.001f) denom2 = 0.001f;
-        float scale2 = focalLength / denom2;
-        out[0] = tmp[0] * scale2;
-        out[1] = tmp[1] * scale2;
-        out[2] = tmp[2] * scale2;
-    }
+
+    // Stereographic projection from 4D to 3D from north pole (0,0,0,R) to plane w=0
+    float x = tmp[0], y = tmp[1], z = tmp[2], w = dims > 3 ? tmp[3] : 0.0f;
+    float radius = sqrtf(x*x + y*y + z*z + w*w);
+    float denom = radius - w;
+    if (fabsf(denom) < 0.001f) denom = 0.001f;
+    float s = radius / denom;
+    out[0] = x * s;
+    out[1] = y * s;
+    out[2] = z * s;
 }
 
 static std::string loadFile(const std::string& path) {
