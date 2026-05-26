@@ -15,16 +15,22 @@ Ducky visualizes N-dimensional objects (3D, 4D, 5D, ...) by recursively projecti
 ## Features
 
 - **N-D Perspective Projection**: Recursively projects N-D geometry down to 3D, then to 2D screen space
-- **N-D Rotation**: All N×(N-1)/2 rotation planes controllable via on-screen slider panel
+- **N-D Rotation**: All N×(N-1)/2 rotation planes controllable via on-screen slider panel or keyboard
 - **Per-Plane Auto-Rotate**: Toggle auto-rotation on/off for each individual rotation plane (green A / dark M)
-- **N-D Translation**: Move through all N dimensions via keyboard
-- **Face-Colored Rendering**: Distinct HSL-based colors per face
+- **GUI Button Panel**: All controls accessible via clickable buttons on the right panel
+- **Face-Colored Rendering**: 4 color schemes — Golden ratio, Rainbow, Monochrome, Warm
 - **Coordinate Axes**: Visualize all N axes with distinct colors
-- **Wireframe Overlay**: Auto-generated edges from mesh topology (hypercube-aware, falls back to triangle edges)
+- **Wireframe Overlay**: Auto-generated edges with depth-independent rendering (toggle with E)
+- **Right-Click Orbit**: Intuitive 3D orbit by right-click dragging off the slider panel
 - **Slider Panel**: Left-side draggable angle sliders for all rotation planes
 - **Frame-Rate Independence**: Auto-rotation speed uses delta-time
+- **Undo/Redo**: Full undo (Ctrl+Z) and redo (Ctrl+Shift+Z) for all rotation and translation changes
+- **Save/Load State**: Persist camera state to disk (Ctrl+S / Ctrl+L)
+- **Fullscreen Mode**: Toggle fullscreen with F11, restores windowed position within monitor bounds
+- **Screenshot**: Timestamped TGA screenshots via F12
+- **Performance Overlay**: FPS counter toggle (F1)
 - **Custom Model Format**: Simple `.dky` format with `dims N` header for defining N-D meshes
-- **Edge Fallback**: Works with both hypercube and arbitrary mesh models
+- **Drag-and-Drop**: Drop model files onto the window to load (notification only)
 - **Cross-Platform**: Builds on Linux and Windows (via cross-compilation)
 
 ## Building
@@ -70,16 +76,6 @@ build\ducky.exe model.dky
 
 ### Keyboard
 
-#### Translation (N-D Movement)
-| Key | Action |
-|-----|--------|
-| `A` / `D` | Move in dimension 0 (X) |
-| `W` / `S` | Move in dimension 1 (Y) |
-| `Q` / `E` | Move in dimension 2 (Z) |
-| `Z` / `X` | Move in dimension 3 (W) |
-| `T` / `G` | Move in dimension 4 |
-| `B` / `H` | Move in dimension 5 |
-
 #### Rotation (N-D Planes)
 | Key | Action |
 |-----|--------|
@@ -90,18 +86,42 @@ build\ducky.exe model.dky
 | `9` / `0` | Rotate in plane 1-3 |
 | `-` / `=` | Rotate in plane 2-3 |
 
-#### Other
+For 6D+ models, additional planes are accessible with Ctrl+ letter pairs:
+`Q`/`W`, `E`/`R`, `T`/`Y`, `U`/`I`, `O`/`P`, `[`/`]`
+
+#### State Management
 | Key | Action |
 |-----|--------|
-| `R` | Reset all rotations, translations, and auto-rotate toggles |
+| `Ctrl+Z` | Undo last rotation/translation change |
+| `Ctrl+Shift+Z` | Redo |
+| `Ctrl+S` | Save camera state to `ducky_state.txt` |
+| `Ctrl+L` | Load camera state from `ducky_state.txt` |
+| `R` | Reset all rotations, translations, and auto-rotate toggles (undo-friendly) |
 
-### Mouse (Slider Panel)
+#### Display Controls
+| Key | Action |
+|-----|--------|
+| `V` | Cycle auto-rotation preset (all on, all off, alternating, every 3rd) |
+| `C` | Cycle color scheme (Golden → Rainbow → Monochrome → Warm) |
+| `E` | Toggle wireframe-only mode (edges only, no faces) |
+| `[` / `]` | Decrease / increase focal length (perspective depth) |
+| `F11` | Toggle fullscreen |
+| `F12` | Take timestamped TGA screenshot |
+| `F1` | Toggle performance overlay (FPS) |
 
+### Mouse
+
+#### Slider Panel
 A left-side panel provides draggable sliders for every rotation plane:
 
 - **Drag the track** to set an angle in [–π, π)
 - **Click the toggle square** to toggle per-plane auto-rotation (green `A` = on, dark `M` = off)
-- Ctrl+R resets all angles and toggles
+
+#### Button Panel
+A right-side panel contains clickable buttons for all actions: Reset, Wireframe, Color, Preset, Focal±, Undo, Redo, Fullscreen, Save, Load, and Screenshot.
+
+#### Right-Click Orbit
+Right-click and drag anywhere outside the slider panel to orbit the view (rotates primary rotation planes).
 
 ## .dky Model Format
 

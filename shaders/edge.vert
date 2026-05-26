@@ -2,16 +2,16 @@
 layout(location = 0) in vec3 aPos;
 
 uniform float uAspect;
+uniform float uDist3D;
 
-const float DIST_3D = 3.0;
 const float Z_NEAR = 0.1;
 const float Z_FAR = 20.0;
 
 void main() {
-    float zDepth = DIST_3D - aPos.z;
+    float zDepth = uDist3D - aPos.z;
     float perspDiv = zDepth > 0.001 ? zDepth : 0.001;
 
-    float z_eye = aPos.z - DIST_3D;
+    float z_eye = aPos.z - uDist3D;
     float clip_z = z_eye * (Z_FAR + Z_NEAR) / (Z_NEAR - Z_FAR) + 2.0 * Z_FAR * Z_NEAR / (Z_NEAR - Z_FAR);
-    gl_Position = vec4(aPos.x * DIST_3D / uAspect, aPos.y * DIST_3D, clip_z, perspDiv);
+    gl_Position = vec4(aPos.x * uDist3D / uAspect, aPos.y * uDist3D, clip_z, perspDiv);
 }

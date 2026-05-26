@@ -8,6 +8,16 @@
 #include <cstdio>
 #include <vector>
 #include <cstdlib>
+#include <cstring>
+#include <set>
+#include <map>
+#include <ctime>
+
+#ifdef _WIN32
+#include <malloc.h>
+#else
+#include <alloca.h>
+#endif
 
 #include "main.hpp"
 
@@ -35,7 +45,7 @@ layout(location = 0) in vec2 aPos;
 uniform vec2 uScreenSize;
 void main() {
     gl_Position = vec4(aPos.x / uScreenSize.x * 2.0 - 1.0,
-                       1.0 - aPos.y / uScreenSize.y * 2.0, 0.0, 1.0);
+                        1.0 - aPos.y / uScreenSize.y * 2.0, 0.0, 1.0);
 }
 )";
 
@@ -52,7 +62,7 @@ struct TransformND {
     std::vector<float> angles;
     std::vector<float> translation;
     std::vector<bool> autoRotate;
-    unsigned int dims;
+    unsigned int dims = 0;
 
     int planeCount() const { return dims * (dims - 1) / 2; }
 
@@ -65,10 +75,15 @@ struct TransformND {
 };
 
 struct MouseState {
-    double x, y;
-    bool left;
-    bool leftPressed;
-    bool leftReleased;
+    double x = 0, y = 0;
+    double lastX = 0, lastY = 0;
+    bool left = false;
+    bool leftPressed = false;
+    bool leftReleased = false;
+    bool right = false;
+    bool rightPressed = false;
+    bool rightReleased = false;
+    bool moved = false;
 };
 
 struct Edge { int a, b; };
@@ -111,12 +126,12 @@ static void applyRotation(float* pos, const TransformND& t) {
     }
 }
 
-static void projectTo3D(const float* in, float* out, int dims) {
-    float tmp[64];
+static void projectPerspective(const float* in, float* out, int dims, float focalLength) {
+    float* tmp = (float*)alloca(dims * sizeof(float));
     for (int i = 0; i < dims; i++) tmp[i] = in[i];
 
     for (int d = dims - 1; d >= 3; d--) {
-        float dist = (float)d;
+        float dist = (float)d * focalLength;
         float depth = dist - tmp[d];
         float scale = depth > 0.001f ? dist / depth : 10.0f;
         for (int c = 0; c < d; c++)
@@ -126,6 +141,69 @@ static void projectTo3D(const float* in, float* out, int dims) {
     out[0] = tmp[0];
     out[1] = tmp[1];
     out[2] = tmp[2];
+}
+
+static void projectOrthographic(const float* in, float* out, int dims) {
+    out[0] = in[0];
+    out[1] = in[1];
+    out[2] = dims > 2 ? in[2] : 0.0f;
+}
+
+static void projectSlicing(const float* in, float* out, int dims, float slicePos, float sliceWidth) {
+    // Project higher dims (5+) down to 4D using perspective
+    float tmp[128];
+    for (int i = 0; i < dims; i++) tmp[i] = in[i];
+    for (int d = dims - 1; d >= 4; d--) {
+        float dist = (float)d * 2.0f;
+        float depth = dist - tmp[d];
+        float scale = depth > 0.001f ? dist / depth : 10.0f;
+        for (int c = 0; c < d; c++)
+            tmp[c] *= scale;
+    }
+    // Slice along dim 3 (4th axis) for the 4D→3D step
+    float w = dims > 3 ? tmp[3] : 0.0f;
+    float dist = fabsf(w - slicePos);
+    if (dist > sliceWidth) {
+        out[0] = 0.0f; out[1] = 0.0f; out[2] = 0.0f;
+        return;
+    }
+    float alpha = 1.0f - dist / sliceWidth;
+    out[0] = tmp[0] * alpha;
+    out[1] = tmp[1] * alpha;
+    out[2] = tmp[2] * alpha;
+}
+
+static void projectStereographic(const float* in, float* out, int dims, float focalLength) {
+    float radius = 0.0f;
+    for (int i = 0; i < dims; i++)
+        radius += in[i] * in[i];
+    radius = sqrtf(radius);
+    float w = dims > 3 ? in[3] : 0.0f;
+    float denom = focalLength * 2.0f - w;
+    if (fabsf(denom) < 0.001f) denom = 0.001f;
+    float scale = focalLength / denom;
+    out[0] = in[0] * scale;
+    out[1] = in[1] * scale;
+    out[2] = (dims > 2 ? in[2] : 0.0f) * scale;
+
+    float* tmp = (float*)alloca(dims * sizeof(float));
+    for (int i = 0; i < dims; i++) tmp[i] = in[i];
+    for (int d = dims - 1; d >= 4; d--) {
+        float dist = (float)(d - 1) * focalLength;
+        float depth = dist - tmp[d];
+        float s = depth > 0.001f ? dist / depth : 10.0f;
+        for (int c = 0; c < d; c++)
+            tmp[c] *= s;
+    }
+    if (dims > 4) {
+        float w2 = tmp[3];
+        float denom2 = focalLength * 2.0f - w2;
+        if (fabsf(denom2) < 0.001f) denom2 = 0.001f;
+        float scale2 = focalLength / denom2;
+        out[0] = tmp[0] * scale2;
+        out[1] = tmp[1] * scale2;
+        out[2] = tmp[2] * scale2;
+    }
 }
 
 static std::string loadFile(const std::string& path) {
@@ -209,54 +287,39 @@ static GLuint createShaderProgramFromSrc(const char* vertSrc, const char* fragSr
 }
 
 static void processInput(GLFWwindow* window, TransformND& t) {
-    if (t.dims >= 1) {
-        if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) t.translation[0] -= MOVE_SPEED;
-        if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) t.translation[0] += MOVE_SPEED;
-    }
-    if (t.dims >= 2) {
-        if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) t.translation[1] += MOVE_SPEED;
-        if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) t.translation[1] -= MOVE_SPEED;
-    }
-    if (t.dims >= 3) {
-        if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS) t.translation[2] += MOVE_SPEED;
-        if (glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS) t.translation[2] -= MOVE_SPEED;
-    }
-    if (t.dims >= 4) {
-        if (glfwGetKey(window, GLFW_KEY_Z) == GLFW_PRESS) t.translation[3] += MOVE_SPEED;
-        if (glfwGetKey(window, GLFW_KEY_X) == GLFW_PRESS) t.translation[3] -= MOVE_SPEED;
-    }
-    if (t.dims >= 5) {
-        if (glfwGetKey(window, GLFW_KEY_T) == GLFW_PRESS) t.translation[4] += MOVE_SPEED;
-        if (glfwGetKey(window, GLFW_KEY_G) == GLFW_PRESS) t.translation[4] -= MOVE_SPEED;
-    }
-    if (t.dims >= 6) {
-        if (glfwGetKey(window, GLFW_KEY_B) == GLFW_PRESS) t.translation[5] += MOVE_SPEED;
-        if (glfwGetKey(window, GLFW_KEY_H) == GLFW_PRESS) t.translation[5] -= MOVE_SPEED;
+    int planeKeysPos[] = {
+        GLFW_KEY_1, GLFW_KEY_3, GLFW_KEY_5, GLFW_KEY_7,
+        GLFW_KEY_9, GLFW_KEY_MINUS
+    };
+    int planeKeysNeg[] = {
+        GLFW_KEY_2, GLFW_KEY_4, GLFW_KEY_6, GLFW_KEY_8,
+        GLFW_KEY_0, GLFW_KEY_EQUAL
+    };
+
+    for (int i = 0; i < 6 && i < t.planeCount(); i++) {
+        if (glfwGetKey(window, planeKeysPos[i]) == GLFW_PRESS)
+            t.angles[i] += ROTATE_SPEED;
+        if (glfwGetKey(window, planeKeysNeg[i]) == GLFW_PRESS)
+            t.angles[i] -= ROTATE_SPEED;
     }
 
-    if (t.planeCount() >= 1) {
-        if (glfwGetKey(window, GLFW_KEY_1) == GLFW_PRESS) t.angles[0] += ROTATE_SPEED;
-        if (glfwGetKey(window, GLFW_KEY_2) == GLFW_PRESS) t.angles[0] -= ROTATE_SPEED;
-    }
-    if (t.planeCount() >= 2) {
-        if (glfwGetKey(window, GLFW_KEY_3) == GLFW_PRESS) t.angles[1] += ROTATE_SPEED;
-        if (glfwGetKey(window, GLFW_KEY_4) == GLFW_PRESS) t.angles[1] -= ROTATE_SPEED;
-    }
-    if (t.planeCount() >= 3) {
-        if (glfwGetKey(window, GLFW_KEY_5) == GLFW_PRESS) t.angles[2] += ROTATE_SPEED;
-        if (glfwGetKey(window, GLFW_KEY_6) == GLFW_PRESS) t.angles[2] -= ROTATE_SPEED;
-    }
-    if (t.planeCount() >= 4) {
-        if (glfwGetKey(window, GLFW_KEY_7) == GLFW_PRESS) t.angles[3] += ROTATE_SPEED;
-        if (glfwGetKey(window, GLFW_KEY_8) == GLFW_PRESS) t.angles[3] -= ROTATE_SPEED;
-    }
-    if (t.planeCount() >= 5) {
-        if (glfwGetKey(window, GLFW_KEY_9) == GLFW_PRESS) t.angles[4] += ROTATE_SPEED;
-        if (glfwGetKey(window, GLFW_KEY_0) == GLFW_PRESS) t.angles[4] -= ROTATE_SPEED;
-    }
-    if (t.planeCount() >= 6) {
-        if (glfwGetKey(window, GLFW_KEY_MINUS) == GLFW_PRESS) t.angles[5] += ROTATE_SPEED;
-        if (glfwGetKey(window, GLFW_KEY_EQUAL) == GLFW_PRESS) t.angles[5] -= ROTATE_SPEED;
+    // Additional planes for 6D+ (Ctrl+letter pairs)
+    int extraKeysPos[] = {
+        GLFW_KEY_Q, GLFW_KEY_E, GLFW_KEY_T, GLFW_KEY_U,
+        GLFW_KEY_O, GLFW_KEY_LEFT_BRACKET
+    };
+    int extraKeysNeg[] = {
+        GLFW_KEY_W, GLFW_KEY_R, GLFW_KEY_Y, GLFW_KEY_I,
+        GLFW_KEY_P, GLFW_KEY_RIGHT_BRACKET
+    };
+    bool ctrl = glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS ||
+                glfwGetKey(window, GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS;
+
+    for (int i = 0; i < 6 && (6 + i) < t.planeCount(); i++) {
+        if (ctrl && glfwGetKey(window, extraKeysPos[i]) == GLFW_PRESS)
+            t.angles[6 + i] += ROTATE_SPEED;
+        if (ctrl && glfwGetKey(window, extraKeysNeg[i]) == GLFW_PRESS)
+            t.angles[6 + i] -= ROTATE_SPEED;
     }
 
     if (glfwGetKey(window, GLFW_KEY_R) == GLFW_PRESS) {
@@ -264,47 +327,80 @@ static void processInput(GLFWwindow* window, TransformND& t) {
         std::fill(t.translation.begin(), t.translation.end(), 0.0f);
         std::fill(t.autoRotate.begin(), t.autoRotate.end(), false);
     }
+
 }
 
 static std::vector<Edge> generateEdges(const float* vertices, unsigned int vertexCount,
                                         unsigned int dims, int fpv,
                                         const unsigned int* indices, unsigned int indexCount) {
-    // Primary: coordinate-differencing (works for hypercubes)
-    std::vector<Edge> edges;
-    for (unsigned int a = 0; a < vertexCount; a++) {
-        for (unsigned int b = a + 1; b < vertexCount; b++) {
+    // Build position → canonical index (first occurrence)
+    std::vector<int> canonical(vertexCount);
+    std::vector<int> reverseCanonical; // canonical index → any actual vertex index
+    for (unsigned int i = 0; i < vertexCount; i++) {
+        int found = -1;
+        for (size_t j = 0; j < reverseCanonical.size(); j++) {
+            int ci = reverseCanonical[j];
+            bool same = true;
+            for (unsigned int d = 0; d < dims; d++) {
+                if (fabsf(vertices[i * fpv + d] - vertices[ci * fpv + d]) > 0.001f) {
+                    same = false;
+                    break;
+                }
+            }
+            if (same) { found = (int)j; break; }
+        }
+        if (found < 0) {
+            found = (int)reverseCanonical.size();
+            reverseCanonical.push_back((int)i);
+        }
+        canonical[i] = found;
+    }
+    unsigned int uniqueCount = (unsigned int)reverseCanonical.size();
+
+    // Brute-force edge detection on unique vertices
+    std::set<std::pair<int,int>> edgeSet;
+    for (unsigned int a = 0; a < uniqueCount; a++) {
+        int ai = reverseCanonical[a];
+        for (unsigned int b = a + 1; b < uniqueCount; b++) {
+            int bi = reverseCanonical[b];
             int diff = 0;
             for (unsigned int d = 0; d < dims; d++) {
-                if (fabsf(vertices[a * fpv + d] - vertices[b * fpv + d]) > 0.001f)
+                if (fabsf(vertices[ai * fpv + d] - vertices[bi * fpv + d]) > 0.001f)
                     diff++;
             }
             if (diff == 1)
-                edges.push_back({(int)a, (int)b});
+                edgeSet.insert({(int)a, (int)b});
         }
     }
 
-    if (!edges.empty())
+    if (!edgeSet.empty()) {
+        std::vector<Edge> edges;
+        edges.reserve(edgeSet.size());
+        for (auto& e : edgeSet)
+            edges.push_back({reverseCanonical[e.first], reverseCanonical[e.second]});
         return edges;
-
-    // Fallback: generate edges from triangle indices, deduplicated
-    // This works for arbitrary meshes (may include quad diagonals)
-    for (unsigned int t = 0; t < indexCount / 3; t++) {
-        unsigned int i0 = indices[t * 3];
-        unsigned int i1 = indices[t * 3 + 1];
-        unsigned int i2 = indices[t * 3 + 2];
-
-        auto addEdge = [&](unsigned int a, unsigned int b) {
-            if (a == b) return;
-            for (auto& e : edges)
-                if ((e.a == (int)a && e.b == (int)b) || (e.a == (int)b && e.b == (int)a))
-                    return;
-            edges.push_back({(int)a, (int)b});
-        };
-        addEdge(i0, i1);
-        addEdge(i1, i2);
-        addEdge(i2, i0);
     }
 
+    // Fallback: count triangle edge occurrences per unique vertex
+    std::map<std::pair<int,int>, int> edgeCounts;
+    for (unsigned int t = 0; t < indexCount / 3; t++) {
+        int tri[3] = {
+            canonical[indices[t * 3]],
+            canonical[indices[t * 3 + 1]],
+            canonical[indices[t * 3 + 2]]
+        };
+        for (int k = 0; k < 3; k++) {
+            int a = tri[k], b = tri[(k + 1) % 3];
+            if (a == b) continue;
+            if (a > b) std::swap(a, b);
+            edgeCounts[{a, b}]++;
+        }
+    }
+
+    std::vector<Edge> edges;
+    edges.reserve(edgeCounts.size());
+    for (auto& ec : edgeCounts)
+        edges.push_back({reverseCanonical[ec.first.first], reverseCanonical[ec.first.second]});
     return edges;
 }
 
@@ -329,16 +425,113 @@ static int drawTextAt(GLuint vao, GLuint vbo, GLuint ebo, GLuint program,
                       float x, float y, const char* text,
                       float screenW, float screenH,
                       const unsigned int* indices, int maxQuads) {
-    char buf[2048];
-    int nq = stb_easy_font_print(x, y, (char*)text, nullptr, buf, sizeof(buf));
+    static std::vector<char> buf(2048);
+    if (buf.size() < 2048) buf.resize(2048);
+    int nq = stb_easy_font_print(x, y, (char*)text, nullptr, buf.data(), (int)buf.size());
     if (nq <= 0 || nq > maxQuads) return 0;
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
-    glBufferSubData(GL_ARRAY_BUFFER, 0, nq * 64, buf);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, nq * 64, buf.data());
     glUseProgram(program);
     glUniform2f(glGetUniformLocation(program, "uScreenSize"), screenW, screenH);
     glBindVertexArray(vao);
     glDrawElements(GL_TRIANGLES, nq * 6, GL_UNSIGNED_INT, nullptr);
     return nq;
+}
+
+static void writeTGA(const char* path, int w, int h, unsigned char* data) {
+    FILE* f = fopen(path, "wb");
+    if (!f) return;
+    unsigned char header[18] = {0};
+    header[2] = 2;
+    header[12] = w & 0xFF;
+    header[13] = (w >> 8) & 0xFF;
+    header[14] = h & 0xFF;
+    header[15] = (h >> 8) & 0xFF;
+    header[16] = 24;
+    fwrite(header, 1, 18, f);
+    for (int y = h - 1; y >= 0; y--)
+        fwrite(data + y * w * 3, 1, w * 3, f);
+    fclose(f);
+}
+
+static void saveState(const char* path, const TransformND& t) {
+    FILE* f = fopen(path, "w");
+    if (!f) { std::cerr << "Failed to save state\n"; return; }
+    fprintf(f, "%u\n", t.dims);
+    for (float a : t.angles) fprintf(f, "%.8f ", a);
+    fprintf(f, "\n");
+    for (float tr : t.translation) fprintf(f, "%.8f ", tr);
+    fprintf(f, "\n");
+    fclose(f);
+    std::cout << "Saved state to " << path << std::endl;
+}
+
+static bool loadState(const char* path, TransformND& t) {
+    FILE* f = fopen(path, "r");
+    if (!f) { std::cerr << "Failed to load state\n"; return false; }
+    unsigned int dims;
+    if (fscanf(f, "%u", &dims) != 1 || dims != t.dims) {
+        fclose(f);
+        std::cerr << "State file dimension mismatch\n";
+        return false;
+    }
+    std::vector<float> newAngles(t.planeCount());
+    std::vector<float> newTranslations(t.dims);
+    bool ok = true;
+    for (int i = 0; i < t.planeCount(); i++) {
+        if (fscanf(f, "%f", &newAngles[i]) != 1) { ok = false; break; }
+    }
+    if (ok) {
+        for (unsigned int i = 0; i < t.dims; i++) {
+            if (fscanf(f, "%f", &newTranslations[i]) != 1) { ok = false; break; }
+        }
+    }
+    fclose(f);
+    if (!ok) {
+        std::cerr << "Failed to read full state from " << path << std::endl;
+        return false;
+    }
+    t.angles = newAngles;
+    t.translation = newTranslations;
+    std::cout << "Loaded state from " << path << std::endl;
+    return true;
+}
+
+static void assignFaceColors(Model& model, int colorScheme) {
+    if (model.vertexCount == 0 || model.indexCount == 0) return;
+    unsigned int dims = model.dimensions;
+    int fpv = dims + 3;
+    unsigned int faces = model.indexCount / 3;
+    const float goldenRatio = 0.618033988749895f;
+
+    for (unsigned int f = 0; f < faces; f++) {
+        float h;
+        switch (colorScheme) {
+            case 1: // rainbow
+                h = (float)f / (float)faces;
+                break;
+            case 2: // monochrome blue
+                h = 0.6f;
+                break;
+            case 3: // warm
+                h = 0.0f + (float)(f % 10) * 0.05f;
+                break;
+            default: // golden ratio
+                h = f * goldenRatio;
+                h = h - floorf(h);
+                break;
+        }
+        float s = (colorScheme == 2) ? 0.4f : 0.85f;
+        float l = 0.45f + ((f / 8) % 3) * 0.2f;
+        float r, g, b;
+        hslToRgb(h, s, l, r, g, b);
+        for (int j = 0; j < 3; j++) {
+            int vi = model.indices[f * 3 + j];
+            model.vertices[vi * fpv + dims] = r;
+            model.vertices[vi * fpv + dims + 1] = g;
+            model.vertices[vi * fpv + dims + 2] = b;
+        }
+    }
 }
 
 int main(int argc, char* argv[]) {
@@ -354,7 +547,7 @@ int main(int argc, char* argv[]) {
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
-    char titleBuf[64];
+    char titleBuf[128];
     GLFWwindow* window = glfwCreateWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "Ducky", nullptr, nullptr);
     if (!window) {
         std::cerr << "Failed to create window" << std::endl;
@@ -373,10 +566,25 @@ int main(int argc, char* argv[]) {
     int fbW = 0, fbH = 0;
     glEnable(GL_DEPTH_TEST);
 
+    // === State variables ===
+    bool showPerformance = false;
+    bool wireframeOnly = false;
+    int colorScheme = 0;
+    int rotPreset = 1;
+    float focalLength = 1.0f;
+    float slicePos = 0.0f;
+    float sliceWidth = 0.5f;
+    int renderMode = 0; // 0=Perspective, 1=Slicing, 2=Stereographic, 3=Orthographic
+    const char* renderModeNames[] = {"Persp", "Slice", "Stereo", "Ortho"};
+    int fullscreenW = 0, fullscreenH = 0;
+    int windowedX = 0, windowedY = 0, windowedW = WINDOW_WIDTH, windowedH = WINDOW_HEIGHT;
+    bool isFullscreen = false;
+    bool orbitMode = false;
+
     const char* modelPath = argc > 1 ? argv[1] : "model.dky";
     Model model = LoadModel(modelPath);
     if (model.vertexCount == 0) {
-        std::cerr << "Failed to load model\n";
+        std::cerr << "Failed to load model: " << modelPath << "\n";
         glfwTerminate();
         return -1;
     }
@@ -386,30 +594,10 @@ int main(int argc, char* argv[]) {
     unsigned int dims = model.dimensions;
     int fpv = dims + 3;
 
-    // Assign face colors via HSL
-    {
-        if (model.vertexCount > 0 && model.indexCount > 0) {
-            unsigned int faces = model.indexCount / 3;
-            const float goldenRatio = 0.618033988749895f;
-            for (unsigned int f = 0; f < faces; f++) {
-                float h = f * goldenRatio;
-                h = h - floorf(h);
-                float s = 0.85f;
-                float l = 0.45f + ((f / 8) % 3) * 0.2f;
-                float r, g, b;
-                hslToRgb(h, s, l, r, g, b);
-                for (int j = 0; j < 3; j++) {
-                    int vi = model.indices[f * 3 + j];
-                    model.vertices[vi * fpv + dims] = r;
-                    model.vertices[vi * fpv + dims + 1] = g;
-                    model.vertices[vi * fpv + dims + 2] = b;
-                }
-            }
-        }
-    }
+    assignFaceColors(model, colorScheme);
 
-    auto edges = generateEdges(model.vertices, model.vertexCount, dims, fpv,
-                                model.indices, model.indexCount);
+    auto edges = generateEdges(model.vertices.data(), model.vertexCount, dims, fpv,
+                                model.indices.data(), model.indexCount);
     std::cout << "Generated " << edges.size() << " edges" << std::endl;
 
     // === 3D scene rendering setup ===
@@ -422,7 +610,7 @@ int main(int argc, char* argv[]) {
     glBindBuffer(GL_ARRAY_BUFFER, tessVBO);
     glBufferData(GL_ARRAY_BUFFER, model.vertexCount * 6 * sizeof(float), nullptr, GL_DYNAMIC_DRAW);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, tessEBO);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, model.indexCount * sizeof(unsigned int), model.indices, GL_STATIC_DRAW);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, model.indexCount * sizeof(unsigned int), model.indices.data(), GL_STATIC_DRAW);
 
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), nullptr);
     glEnableVertexAttribArray(0);
@@ -432,6 +620,7 @@ int main(int argc, char* argv[]) {
     GLuint tessProgram = createShaderProgram("shaders/tesseract.vert", "shaders/tesseract.frag");
     if (!tessProgram) { glfwTerminate(); return -1; }
     GLuint tessUAspect = glGetUniformLocation(tessProgram, "uAspect");
+    GLuint tessUDist3D = glGetUniformLocation(tessProgram, "uDist3D");
 
     // === Axes setup ===
     GLuint axesVAO, axesVBO;
@@ -439,7 +628,7 @@ int main(int argc, char* argv[]) {
     glGenBuffers(1, &axesVBO);
 
     {
-        float* axisData = new float[dims * 2 * 6];
+        std::vector<float> axisData(dims * 2 * 6);
         for (unsigned int d = 0; d < dims; d++) {
             float h = (float)d / (float)dims;
             float r, g, b;
@@ -448,21 +637,17 @@ int main(int argc, char* argv[]) {
             axisData[d * 12 + 3] = r; axisData[d * 12 + 4] = g; axisData[d * 12 + 5] = b;
             axisData[d * 12 + 6] = 0; axisData[d * 12 + 7] = 0; axisData[d * 12 + 8] = 0;
             axisData[d * 12 + 9] = r; axisData[d * 12 + 10] = g; axisData[d * 12 + 11] = b;
-
         }
 
         glBindVertexArray(axesVAO);
         glBindBuffer(GL_ARRAY_BUFFER, axesVBO);
-        glBufferData(GL_ARRAY_BUFFER, dims * 2 * 6 * sizeof(float), axisData, GL_DYNAMIC_DRAW);
+        glBufferData(GL_ARRAY_BUFFER, axisData.size() * sizeof(float), axisData.data(), GL_DYNAMIC_DRAW);
         glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), nullptr);
         glEnableVertexAttribArray(0);
         glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)(3 * sizeof(float)));
         glEnableVertexAttribArray(1);
-
-        delete[] axisData;
     }
 
-    // Pre-computed axis colors (never change per frame)
     std::vector<float> axisR(dims), axisG(dims), axisB(dims);
     for (unsigned int d = 0; d < dims; d++) {
         float h = (float)d / (float)dims;
@@ -472,6 +657,7 @@ int main(int argc, char* argv[]) {
     GLuint axesProgram = createShaderProgram("shaders/axes.vert", "shaders/axes.frag");
     if (!axesProgram) { glfwTerminate(); return -1; }
     GLuint axesUAspect = glGetUniformLocation(axesProgram, "uAspect");
+    GLuint axesUDist3D = glGetUniformLocation(axesProgram, "uDist3D");
 
     // === Wireframe edges setup ===
     GLuint edgeVAO, edgeVBO;
@@ -487,6 +673,7 @@ int main(int argc, char* argv[]) {
     GLuint edgeProgram = createShaderProgram("shaders/edge.vert", "shaders/edge.frag");
     if (!edgeProgram) { glfwTerminate(); return -1; }
     GLuint edgeUAspect = glGetUniformLocation(edgeProgram, "uAspect");
+    GLuint edgeUDist3D = glGetUniformLocation(edgeProgram, "uDist3D");
 
     // === UI setup ===
     GLuint uiProgram = createShaderProgramFromSrc(UI_VERT_SRC, UI_FRAG_SRC);
@@ -501,7 +688,6 @@ int main(int argc, char* argv[]) {
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), nullptr);
     glEnableVertexAttribArray(0);
 
-    // Dynamic text for sliders
     const int TEXT_MAX_QUADS = 512;
     GLuint dtVAO, dtVBO, dtEBO;
     glGenVertexArrays(1, &dtVAO);
@@ -531,10 +717,7 @@ int main(int argc, char* argv[]) {
     GLuint textProgram = createShaderProgram("shaders/text.vert", "shaders/text.frag");
     if (!textProgram) { glfwTerminate(); return -1; }
 
-    // === HUD text (one-line hint at top-right area) ===
-    std::string hintText = std::to_string(dims) + "D  |  Move:WASD=01 QE=2 ZX=3 TG=4 BH=5  |  Rot keys:12 34 56 78 90 -+  |  R=reset";
-    char textBuffer[20000];
-    int hudNumQuads = 0;
+    std::string hintText = std::to_string(dims) + "D  |  Rot:12 34 56 78 90 -=  |  E=wireframe V=preset C=color []=focal R=reset  |  F11=fs F12=shot F1=perf  |  Right panel has all controls";
 
     GLuint textVAO, textVBO, textEBO;
     glGenVertexArrays(1, &textVAO);
@@ -566,7 +749,7 @@ int main(int argc, char* argv[]) {
     TransformND transform;
     transform.dims = dims;
     transform.angles.resize(transform.planeCount(), 0.0f);
-    transform.autoRotate.resize(transform.planeCount(), false);
+    transform.autoRotate.resize(transform.planeCount(), true);
     transform.translation.resize(dims, 0.0f);
 
     std::vector<float> projectedVerts(model.vertexCount * 6);
@@ -575,8 +758,16 @@ int main(int argc, char* argv[]) {
     MouseState mouse = {};
     int dragSlider = -1;
     int hoverSlider = -1;
+    int clickedButton = -1;
 
-    // Reusable buffers (persistent across frames)
+    enum ButtonId {
+        BTN_RESET, BTN_WIREFRAME, BTN_COLOR, BTN_PRESET,
+        BTN_FOCAL_DOWN, BTN_FOCAL_UP, BTN_MODE, BTN_SLICE_DOWN,
+        BTN_SLICE_UP, BTN_FS, BTN_SAVE, BTN_LOAD, BTN_SHOT,
+        BTN_COUNT
+    };
+
+    // Reusable buffers
     std::vector<float> axis3D(dims * 2 * 6);
     std::vector<float> edge3D(edges.size() * 2 * 3);
     struct TriDepth { int idx; float depth; };
@@ -585,29 +776,212 @@ int main(int argc, char* argv[]) {
     std::vector<unsigned int> sorted;
     sorted.reserve(model.indexCount + 3);
 
+    // Performance tracking
+    double perfLastTime = glfwGetTime();
+    int perfFrameCount = 0;
+    float perfFps = 0.0f;
+
     double lastTime = glfwGetTime();
 
-    // Render loop
+    // Set drop callback
+    glfwSetWindowUserPointer(window, &model);
+    glfwSetDropCallback(window, [](GLFWwindow* win, int count, const char** paths) {
+        if (count > 0) {
+            std::cout << "Dropped file: " << paths[0] << std::endl;
+        }
+    });
+
     while (!glfwWindowShouldClose(window)) {
         // Mouse state
         {
             double mx, my;
             glfwGetCursorPos(window, &mx, &my);
             bool leftNow = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
+            bool rightNow = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS;
             mouse.leftPressed = leftNow && !mouse.left;
             mouse.leftReleased = !leftNow && mouse.left;
             mouse.left = leftNow;
+            mouse.rightPressed = rightNow && !mouse.right;
+            mouse.rightReleased = !rightNow && mouse.right;
+            mouse.right = rightNow;
+            mouse.moved = (mx != mouse.x || my != mouse.y);
+            mouse.lastX = mouse.x;
+            mouse.lastY = mouse.y;
             mouse.x = mx;
             mouse.y = my;
         }
 
         processInput(window, transform);
 
-        // Per-plane auto-rotation (frame-rate independent)
+        // Save/Load state
+        {
+            bool ctrl = glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS ||
+                        glfwGetKey(window, GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS;
+            static bool sPrev = false, lPrev = false;
+            bool sNow = glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS;
+            bool lNow = glfwGetKey(window, GLFW_KEY_L) == GLFW_PRESS;
+            if (ctrl && sNow && !sPrev) saveState("ducky_state.txt", transform);
+            if (ctrl && lNow && !lPrev) loadState("ducky_state.txt", transform);
+            sPrev = sNow;
+            lPrev = lNow;
+        }
+
+        // Fullscreen toggle (F11)
+        {
+            static bool f11Prev = false;
+            bool f11Now = glfwGetKey(window, GLFW_KEY_F11) == GLFW_PRESS;
+            if (f11Now && !f11Prev) {
+                isFullscreen = !isFullscreen;
+                if (isFullscreen) {
+                    glfwGetWindowPos(window, &windowedX, &windowedY);
+                    glfwGetWindowSize(window, &windowedW, &windowedH);
+                    GLFWmonitor* monitor = glfwGetPrimaryMonitor();
+                    const GLFWvidmode* mode = glfwGetVideoMode(monitor);
+                    fullscreenW = mode->width;
+                    fullscreenH = mode->height;
+                    glfwSetWindowMonitor(window, monitor, 0, 0, fullscreenW, fullscreenH, mode->refreshRate);
+                } else {
+                    GLFWmonitor* mon = glfwGetPrimaryMonitor();
+                    const GLFWvidmode* vm = glfwGetVideoMode(mon);
+                    int monX, monY, monW, monH;
+                    glfwGetMonitorWorkarea(mon, &monX, &monY, &monW, &monH);
+                    int restoreX = std::max(monX, std::min(windowedX, monX + monW - 100));
+                    int restoreY = std::max(monY, std::min(windowedY, monY + monH - 100));
+                    int restoreW = std::max(100, std::min(windowedW, monW));
+                    int restoreH = std::max(100, std::min(windowedH, monH));
+                    glfwSetWindowMonitor(window, nullptr, restoreX, restoreY, restoreW, restoreH, 0);
+                }
+            }
+            f11Prev = f11Now;
+        }
+
+        // Screenshot (F12)
+        {
+            static bool f12Prev = false;
+            bool f12Now = glfwGetKey(window, GLFW_KEY_F12) == GLFW_PRESS;
+            if (f12Now && !f12Prev) {
+                glfwGetFramebufferSize(window, &fbW, &fbH);
+                std::vector<unsigned char> pixels(fbW * fbH * 3);
+                glReadPixels(0, 0, fbW, fbH, GL_RGB, GL_UNSIGNED_BYTE, pixels.data());
+                char screenshotPath[64];
+                time_t now = time(nullptr);
+                struct tm* tmNow = localtime(&now);
+                snprintf(screenshotPath, sizeof(screenshotPath), "screenshot_%04d%02d%02d_%02d%02d%02d.tga",
+                         tmNow->tm_year + 1900, tmNow->tm_mon + 1, tmNow->tm_mday,
+                         tmNow->tm_hour, tmNow->tm_min, tmNow->tm_sec);
+                writeTGA(screenshotPath, fbW, fbH, pixels.data());
+                std::cout << "Screenshot saved: " << screenshotPath << std::endl;
+            }
+            f12Prev = f12Now;
+        }
+
+        // Performance overlay toggle (F1)
+        {
+            static bool f1Prev = false;
+            bool f1Now = glfwGetKey(window, GLFW_KEY_F1) == GLFW_PRESS;
+            if (f1Now && !f1Prev) showPerformance = !showPerformance;
+            f1Prev = f1Now;
+        }
+
+        // Wireframe toggle (E key with no modifiers)
+        {
+            bool ctrl = glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS ||
+                        glfwGetKey(window, GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS;
+            static bool ePrev = false;
+            bool eNow = glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS;
+            if (eNow && !ePrev && !ctrl) wireframeOnly = !wireframeOnly;
+            ePrev = eNow;
+        }
+
+        // Color scheme cycle (C)
+        {
+            static bool cPrev = false;
+            bool cNow = glfwGetKey(window, GLFW_KEY_C) == GLFW_PRESS;
+            bool ctrl = glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS ||
+                        glfwGetKey(window, GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS;
+            if (cNow && !cPrev && !ctrl) {
+                colorScheme = (colorScheme + 1) % 4;
+                assignFaceColors(model, colorScheme);
+            }
+            cPrev = cNow;
+        }
+
+        // Render mode cycle (M)
+        {
+            static bool mPrev = false;
+            bool mNow = glfwGetKey(window, GLFW_KEY_M) == GLFW_PRESS;
+            if (mNow && !mPrev) renderMode = (renderMode + 1) % 4;
+            mPrev = mNow;
+        }
+
+        // Auto-rotation preset cycle (V)
+        {
+            static bool vPrev = false;
+            bool vNow = glfwGetKey(window, GLFW_KEY_V) == GLFW_PRESS;
+            if (vNow && !vPrev) {
+                rotPreset = (rotPreset + 1) % 4;
+                switch (rotPreset) {
+                    case 0:
+                        std::fill(transform.autoRotate.begin(), transform.autoRotate.end(), false);
+                        break;
+                    case 1:
+                        std::fill(transform.autoRotate.begin(), transform.autoRotate.end(), true);
+                        break;
+                    case 2:
+                        for (int i = 0; i < transform.planeCount(); i++)
+                            transform.autoRotate[i] = (i % 2 == 0);
+                        break;
+                    case 3:
+                        for (int i = 0; i < transform.planeCount(); i++)
+                            transform.autoRotate[i] = (i % 3 == 0);
+                        break;
+                }
+            }
+            vPrev = vNow;
+        }
+
+        // Clipping plane (focal length) controls - [ and ]
+        {
+            static bool leftBracketPrev = false, rightBracketPrev = false;
+            bool leftBracketNow = glfwGetKey(window, GLFW_KEY_LEFT_BRACKET) == GLFW_PRESS;
+            bool rightBracketNow = glfwGetKey(window, GLFW_KEY_RIGHT_BRACKET) == GLFW_PRESS;
+            bool ctrl = glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS ||
+                        glfwGetKey(window, GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS;
+            if (leftBracketNow && !leftBracketPrev && !ctrl) focalLength = std::max(0.1f, focalLength - 0.1f);
+            if (rightBracketNow && !rightBracketPrev && !ctrl) focalLength = std::min(5.0f, focalLength + 0.1f);
+            leftBracketPrev = leftBracketNow;
+            rightBracketPrev = rightBracketNow;
+        }
+
+        // Mouse orbit (right-click drag)
+        {
+            if (mouse.rightPressed) {
+                int nSlidersTmp = transform.planeCount();
+                float panelHTmp = PAD * 2.0f + 24.0f + (float)nSlidersTmp * SLIDER_HEIGHT + 10.0f;
+                bool overSlider = mouse.x >= 10.0f && mouse.x <= 10.0f + PANEL_WIDTH &&
+                                  mouse.y >= 10.0f && mouse.y <= 10.0f + panelHTmp;
+                if (!overSlider && !mouse.left)
+                    orbitMode = true;
+            }
+            if (mouse.rightReleased) {
+                orbitMode = false;
+            }
+            if (orbitMode && mouse.right && mouse.moved) {
+                double dx = mouse.x - mouse.lastX;
+                double dy = mouse.y - mouse.lastY;
+                if (transform.planeCount() >= 1)
+                    transform.angles[0] += (float)dx * 0.005f;
+                if (transform.planeCount() >= 2)
+                    transform.angles[1] += (float)dy * 0.005f;
+            }
+        }
+
+        // Per-plane auto-rotation with clamped delta
         {
             double now = glfwGetTime();
-            float dt = (float)(now - lastTime);
+            float dt = std::min((float)(now - lastTime), 0.05f);
             lastTime = now;
+
             for (int i = 0; i < transform.planeCount(); i++) {
                 if (transform.autoRotate[i])
                     transform.angles[i] += dt * 0.5f * (1 + (i % 3));
@@ -615,14 +989,18 @@ int main(int argc, char* argv[]) {
         }
 
         // Wrap all angles to [-PI, PI)
-        for (int i = 0; i < transform.planeCount(); i++)
-            transform.angles[i] = fmodf(transform.angles[i] + PI, 2.0f * PI) - PI;
+        for (int i = 0; i < transform.planeCount(); i++) {
+            float a = transform.angles[i];
+            transform.angles[i] = fmodf(a + PI, 2.0f * PI);
+            if (transform.angles[i] < 0) transform.angles[i] += 2.0f * PI;
+            transform.angles[i] -= PI;
+        }
 
         glfwGetFramebufferSize(window, &fbW, &fbH);
         glViewport(0, 0, fbW, fbH);
         float aspect = (float)fbW / (float)fbH;
 
-        snprintf(titleBuf, sizeof(titleBuf), "Ducky - %uD (%u verts, %zu edges)",
+        snprintf(titleBuf, sizeof(titleBuf), "Ducky - %uD (%u verts, %zu edges) [F1=perf]",
                  dims, model.vertexCount, edges.size());
         glfwSetWindowTitle(window, titleBuf);
 
@@ -637,30 +1015,30 @@ int main(int argc, char* argv[]) {
             float trackX = labelX + LABEL_WIDTH + PAD;
             float trackW = PANEL_WIDTH - (trackX - panelLeft) - VALUE_WIDTH - PAD;
 
-            // Toggle click
             if (mouse.leftPressed) {
+                bool sliderHit = false;
                 for (int i = 0; i < nSliders; i++) {
                     float rowY = panelTop + PAD + titleH + PAD + i * SLIDER_HEIGHT;
                     float tglY = rowY + (SLIDER_HEIGHT - TOGGLE_SIZE) / 2;
                     if (mouse.x >= toggleX && mouse.x <= toggleX + TOGGLE_SIZE &&
                         mouse.y >= tglY && mouse.y <= tglY + TOGGLE_SIZE) {
                         transform.autoRotate[i] = !transform.autoRotate[i];
+                        sliderHit = true;
                         break;
                     }
                 }
-            }
-
-            if (mouse.leftPressed) {
-                dragSlider = -1;
-                for (int i = 0; i < nSliders; i++) {
-                    float rowY = panelTop + PAD + titleH + PAD + i * SLIDER_HEIGHT;
-                    if (mouse.x >= trackX && mouse.x <= trackX + trackW &&
-                        mouse.y >= rowY && mouse.y <= rowY + SLIDER_HEIGHT) {
-                        dragSlider = i;
-                        float t = (float)((mouse.x - trackX) / trackW);
-                        t = std::max(0.0f, std::min(1.0f, t));
-                        transform.angles[i] = -PI + t * (2.0f * PI);
-                        break;
+                if (!sliderHit) {
+                    dragSlider = -1;
+                    for (int i = 0; i < nSliders; i++) {
+                        float rowY = panelTop + PAD + titleH + PAD + i * SLIDER_HEIGHT;
+                        if (mouse.x >= trackX && mouse.x <= trackX + trackW &&
+                            mouse.y >= rowY && mouse.y <= rowY + SLIDER_HEIGHT) {
+                            dragSlider = i;
+                            float t = (float)((mouse.x - trackX) / trackW);
+                            t = std::max(0.0f, std::min(1.0f, t));
+                            transform.angles[i] = -PI + t * (2.0f * PI);
+                            break;
+                        }
                     }
                 }
             }
@@ -671,8 +1049,112 @@ int main(int argc, char* argv[]) {
                 transform.angles[dragSlider] = -PI + t * (2.0f * PI);
             }
 
-            if (mouse.leftReleased)
+            if (mouse.leftReleased) {
+                if (clickedButton >= 0) {
+                    // Process button action
+                    switch (clickedButton) {
+                        case BTN_RESET:
+                            std::fill(transform.angles.begin(), transform.angles.end(), 0.0f);
+                            std::fill(transform.translation.begin(), transform.translation.end(), 0.0f);
+                            std::fill(transform.autoRotate.begin(), transform.autoRotate.end(), false);
+                            break;
+                        case BTN_WIREFRAME:
+                            wireframeOnly = !wireframeOnly;
+                            break;
+                        case BTN_COLOR:
+                            colorScheme = (colorScheme + 1) % 4;
+                            assignFaceColors(model, colorScheme);
+                            break;
+                        case BTN_PRESET:
+                            rotPreset = (rotPreset + 1) % 4;
+                            switch (rotPreset) {
+                                case 0: std::fill(transform.autoRotate.begin(), transform.autoRotate.end(), false); break;
+                                case 1: std::fill(transform.autoRotate.begin(), transform.autoRotate.end(), true); break;
+                                case 2: for (int i = 0; i < transform.planeCount(); i++) transform.autoRotate[i] = (i % 2 == 0); break;
+                                case 3: for (int i = 0; i < transform.planeCount(); i++) transform.autoRotate[i] = (i % 3 == 0); break;
+                            }
+                            break;
+                        case BTN_FOCAL_DOWN:
+                            focalLength = std::max(0.1f, focalLength - 0.1f);
+                            break;
+                        case BTN_FOCAL_UP:
+                            focalLength = std::min(5.0f, focalLength + 0.1f);
+                            break;
+                        case BTN_MODE:
+                            renderMode = (renderMode + 1) % 4;
+                            break;
+                        case BTN_SLICE_DOWN:
+                            slicePos -= 0.1f;
+                            break;
+                        case BTN_SLICE_UP:
+                            slicePos += 0.1f;
+                            break;
+                        case BTN_FS: {
+                            isFullscreen = !isFullscreen;
+                            if (isFullscreen) {
+                                glfwGetWindowPos(window, &windowedX, &windowedY);
+                                glfwGetWindowSize(window, &windowedW, &windowedH);
+                                GLFWmonitor* monitor = glfwGetPrimaryMonitor();
+                                const GLFWvidmode* mode = glfwGetVideoMode(monitor);
+                                fullscreenW = mode->width;
+                                fullscreenH = mode->height;
+                                glfwSetWindowMonitor(window, monitor, 0, 0, fullscreenW, fullscreenH, mode->refreshRate);
+                            } else {
+                                GLFWmonitor* mon = glfwGetPrimaryMonitor();
+                                int monX, monY, monW, monH;
+                                glfwGetMonitorWorkarea(mon, &monX, &monY, &monW, &monH);
+                                int restoreX = std::max(monX, std::min(windowedX, monX + monW - 100));
+                                int restoreY = std::max(monY, std::min(windowedY, monY + monH - 100));
+                                int restoreW = std::max(100, std::min(windowedW, monW));
+                                int restoreH = std::max(100, std::min(windowedH, monH));
+                                glfwSetWindowMonitor(window, nullptr, restoreX, restoreY, restoreW, restoreH, 0);
+                            }
+                            break;
+                        }
+                        case BTN_SAVE:
+                            saveState("ducky_state.txt", transform);
+                            break;
+                        case BTN_LOAD:
+                            loadState("ducky_state.txt", transform);
+                            break;
+                        case BTN_SHOT: {
+                            glfwGetFramebufferSize(window, &fbW, &fbH);
+                            std::vector<unsigned char> pixels(fbW * fbH * 3);
+                            glReadPixels(0, 0, fbW, fbH, GL_RGB, GL_UNSIGNED_BYTE, pixels.data());
+                            char screenshotPath[64];
+                            time_t now = time(nullptr);
+                            struct tm* tmNow = localtime(&now);
+                            snprintf(screenshotPath, sizeof(screenshotPath), "screenshot_%04d%02d%02d_%02d%02d%02d.tga",
+                                     tmNow->tm_year + 1900, tmNow->tm_mon + 1, tmNow->tm_mday,
+                                     tmNow->tm_hour, tmNow->tm_min, tmNow->tm_sec);
+                            writeTGA(screenshotPath, fbW, fbH, pixels.data());
+                            std::cout << "Screenshot saved: " << screenshotPath << std::endl;
+                            break;
+                        }
+                    }
+                }
                 dragSlider = -1;
+                clickedButton = -1;
+            }
+
+            // Check button clicks on press
+            if (mouse.leftPressed && clickedButton < 0) {
+                int btnW = 76, btnH = 24, gap = 4, colGap = 5;
+                int btnStartX = (int)((float)fbW - 260.0f + 8);
+                int btnStartY = (int)(10.0f + 155);
+                int btnCols = 4;
+                for (int b = 0; b < BTN_COUNT; b++) {
+                    int col = b % btnCols;
+                    int row = b / btnCols;
+                    int bx = btnStartX + col * (btnW + colGap);
+                    int by = btnStartY + row * (btnH + gap);
+                    if (mouse.x >= bx && mouse.x <= bx + btnW &&
+                        mouse.y >= by && mouse.y <= by + btnH) {
+                        clickedButton = b;
+                        break;
+                    }
+                }
+            }
 
             hoverSlider = -1;
             for (int i = 0; i < nSliders; i++) {
@@ -684,20 +1166,25 @@ int main(int argc, char* argv[]) {
         }
 
         // Process vertices
+        float* pos = (float*)alloca(dims * sizeof(float));
         for (unsigned int i = 0; i < model.vertexCount; i++) {
-            float pos[16];
             for (unsigned int d = 0; d < dims; d++)
                 pos[d] = model.vertices[i * fpv + d];
             for (unsigned int d = 0; d < dims; d++)
                 pos[d] += transform.translation[d];
             applyRotation(pos, transform);
-            projectTo3D(pos, &projectedVerts[i * 6], dims);
+            switch (renderMode) {
+                case 0: projectPerspective(pos, &projectedVerts[i * 6], dims, focalLength); break;
+                case 1: projectSlicing(pos, &projectedVerts[i * 6], dims, slicePos, sliceWidth); break;
+                case 2: projectStereographic(pos, &projectedVerts[i * 6], dims, focalLength); break;
+                default: projectOrthographic(pos, &projectedVerts[i * 6], dims); break;
+            }
             projectedVerts[i * 6 + 3] = model.vertices[i * fpv + dims];
             projectedVerts[i * 6 + 4] = model.vertices[i * fpv + dims + 1];
             projectedVerts[i * 6 + 5] = model.vertices[i * fpv + dims + 2];
         }
 
-        // Depth sort (reused buffers)
+        // Depth sort
         {
             unsigned int numTri = model.indexCount / 3;
             triDepths.resize(numTri);
@@ -730,22 +1217,27 @@ int main(int argc, char* argv[]) {
         glClearColor(0.05f, 0.05f, 0.1f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-        // Draw tesseract faces
-        glUseProgram(tessProgram);
-        glUniform1f(tessUAspect, aspect);
-        glBindVertexArray(tessVAO);
-        glDrawElements(GL_TRIANGLES, model.indexCount, GL_UNSIGNED_INT, nullptr);
+        // Draw faces (skip in wireframe-only mode)
+        if (!wireframeOnly) {
+            glUseProgram(tessProgram);
+            glUniform1f(tessUAspect, aspect);
+            glUniform1f(tessUDist3D, 3.0f * focalLength);
+            glBindVertexArray(tessVAO);
+            glDrawElements(GL_TRIANGLES, model.indexCount, GL_UNSIGNED_INT, nullptr);
+        }
 
-        // Draw axes (reused buffer, pre-computed colors)
+        // Draw axes
         {
+            float* origin = (float*)alloca(dims * sizeof(float));
+            float* tip = (float*)alloca(dims * sizeof(float));
             for (unsigned int d = 0; d < dims; d++) {
-                float origin[64] = {0};
-                float tip[64] = {0};
+                memset(origin, 0, dims * sizeof(float));
+                memset(tip, 0, dims * sizeof(float));
                 tip[d] = AXIS_LENGTH;
                 applyRotation(origin, transform);
                 applyRotation(tip, transform);
-                projectTo3D(origin, &axis3D[d * 12], dims);
-                projectTo3D(tip, &axis3D[d * 12 + 6], dims);
+                projectPerspective(origin, &axis3D[d * 12], dims, focalLength);
+                projectPerspective(tip, &axis3D[d * 12 + 6], dims, focalLength);
                 axis3D[d * 12 + 3] = axisR[d]; axis3D[d * 12 + 4] = axisG[d]; axis3D[d * 12 + 5] = axisB[d];
                 axis3D[d * 12 + 9] = axisR[d]; axis3D[d * 12 + 10] = axisG[d]; axis3D[d * 12 + 11] = axisB[d];
             }
@@ -753,11 +1245,12 @@ int main(int argc, char* argv[]) {
             glBufferSubData(GL_ARRAY_BUFFER, 0, dims * 2 * 6 * sizeof(float), axis3D.data());
             glUseProgram(axesProgram);
             glUniform1f(axesUAspect, aspect);
+            glUniform1f(axesUDist3D, 3.0f * focalLength);
             glBindVertexArray(axesVAO);
             glDrawArrays(GL_LINES, 0, dims * 2);
         }
 
-        // Draw wireframe edges (reused buffer)
+        // Draw wireframe edges
         {
             for (size_t i = 0; i < edges.size(); i++) {
                 edge3D[i * 6 + 0] = projectedVerts[edges[i].a * 6];
@@ -773,24 +1266,27 @@ int main(int argc, char* argv[]) {
             glDisable(GL_DEPTH_TEST);
             glUseProgram(edgeProgram);
             glUniform1f(edgeUAspect, aspect);
+            glUniform1f(edgeUDist3D, 3.0f * focalLength);
             glBindVertexArray(edgeVAO);
             glDrawArrays(GL_LINES, 0, edges.size() * 2);
+            glEnable(GL_DEPTH_TEST);
         }
 
-        // === UI overlay (no depth test) ===
+        // === UI overlay ===
         glDisable(GL_DEPTH_TEST);
 
-        // Draw slider panel background
         int nSliders = transform.planeCount();
         float panelTop = 10.0f;
         float panelLeft = 10.0f;
         float titleH = 24.0f;
         float panelH = PAD * 2 + titleH + nSliders * SLIDER_HEIGHT + 10.0f;
+
+        // Slider panel background
         drawRect(uiProgram, uiVAO, uiVBO,
                  panelLeft, panelTop, PANEL_WIDTH, panelH,
                  0.12f, 0.12f, 0.18f, 0.92f, (float)fbW, (float)fbH);
 
-        // Draw border
+        // Border
         drawRect(uiProgram, uiVAO, uiVBO,
                  panelLeft, panelTop, PANEL_WIDTH, 1.0f,
                  0.3f, 0.3f, 0.5f, 0.8f, (float)fbW, (float)fbH);
@@ -813,7 +1309,6 @@ int main(int argc, char* argv[]) {
         for (int i = 0; i < nSliders; i++) {
             float rowY = panelTop + PAD + titleH + PAD + i * SLIDER_HEIGHT;
 
-            // Toggle button
             bool autoOn = transform.autoRotate[i];
             drawRect(uiProgram, uiVAO, uiVBO,
                      toggleX, rowY + (SLIDER_HEIGHT - TOGGLE_SIZE) / 2,
@@ -826,7 +1321,6 @@ int main(int argc, char* argv[]) {
                        toggleX + 4, tglY + 3, toggleLabel,
                        (float)fbW, (float)fbH, dtIndices.data(), TEXT_MAX_QUADS);
 
-            // Label
             int pi = 0;
             int ai = -1, aj = -1;
             for (int a = 0; a < (int)dims && pi <= i; a++)
@@ -834,12 +1328,10 @@ int main(int argc, char* argv[]) {
                     if (pi == i) { ai = a; aj = b; }
             snprintf(label, sizeof(label), "(%d,%d)", ai, aj);
 
-            // Track background
             drawRect(uiProgram, uiVAO, uiVBO,
                      trackX, rowY, trackW, SLIDER_HEIGHT,
                      0.2f, 0.2f, 0.3f, 0.9f, (float)fbW, (float)fbH);
 
-            // Track fill (left portion up to value)
             float val = transform.angles[i];
             float fillFrac = (val + PI) / (2.0f * PI);
             fillFrac = std::max(0.0f, std::min(1.0f, fillFrac));
@@ -847,7 +1339,6 @@ int main(int argc, char* argv[]) {
                      trackX, rowY, trackW * fillFrac, SLIDER_HEIGHT,
                      0.35f, 0.5f, 0.9f, 0.8f, (float)fbW, (float)fbH);
 
-            // Value string
             snprintf(valueStr, sizeof(valueStr), "%.2f", val);
             drawTextAt(dtVAO, dtVBO, dtEBO, textProgram,
                        trackX + trackW + PAD, rowY, valueStr,
@@ -862,14 +1353,102 @@ int main(int argc, char* argv[]) {
                    panelLeft + PAD, panelTop + PAD, titleStr,
                    (float)fbW, (float)fbH, dtIndices.data(), TEXT_MAX_QUADS);
 
-        // HUD text (top-right area)
+        // Model info + buttons panel (right side)
         {
+            float infoX = (float)fbW - 260.0f;
+            float infoY = 10.0f;
+            float infoH = 300.0f;
+            drawRect(uiProgram, uiVAO, uiVBO,
+                     infoX, infoY, 250.0f, infoH,
+                     0.12f, 0.12f, 0.18f, 0.92f, (float)fbW, (float)fbH);
+
+            char infoLines[512];
+            snprintf(infoLines, sizeof(infoLines),
+                      "%uD Model\n"
+                      "Vertices: %u\n"
+                      "Triangles: %u\n"
+                      "Edges: %zu\n"
+                      "Planes: %d\n"
+                      "Focal: %.1f\n"
+                      "Scheme: %s\n"
+                      "Wireframe: %s\n"
+                      "Mode: %s\n"
+                      "Slice: %.1f",
+                      dims, model.vertexCount, model.indexCount / 3,
+                      edges.size(), transform.planeCount(),
+                      focalLength,
+                      colorScheme == 0 ? "Golden" : colorScheme == 1 ? "Rainbow" : colorScheme == 2 ? "Mono" : "Warm",
+                      wireframeOnly ? "ON" : "OFF",
+                      renderModeNames[renderMode],
+                      slicePos);
+
+            std::string infoStr(infoLines);
+            size_t pos = 0;
+            float lineY = infoY + 8;
+            while (pos < infoStr.size()) {
+                size_t nl = infoStr.find('\n', pos);
+                if (nl == std::string::npos) nl = infoStr.size();
+                std::string line = infoStr.substr(pos, nl - pos);
+                drawTextAt(dtVAO, dtVBO, dtEBO, textProgram,
+                           infoX + 8, lineY, line.c_str(),
+                           (float)fbW, (float)fbH, dtIndices.data(), TEXT_MAX_QUADS);
+                lineY += 14;
+                pos = nl + 1;
+            }
+
+            // Draw action buttons
+            int btnW = 76, btnH = 24, gap = 4, colGap = 5;
+            int btnStartX = (int)infoX + 8;
+            int btnStartY = (int)infoY + 155;
+            const char* btnLabels[] = {"Rst", "Wir", "Col", "Pre",
+                                        "Foc-", "Foc+", "Mode", "Slc-",
+                                        "Slc+", "FS", "Save", "Load", "Shot"};
+            int btnCols = 4;
+            for (int b = 0; b < BTN_COUNT; b++) {
+                int col = b % btnCols;
+                int row = b / btnCols;
+                int bx = btnStartX + col * (btnW + colGap);
+                int by = btnStartY + row * (btnH + gap);
+                bool hovered = (mouse.x >= bx && mouse.x <= bx + btnW &&
+                                mouse.y >= by && mouse.y <= by + btnH);
+                drawRect(uiProgram, uiVAO, uiVBO,
+                         (float)bx, (float)by, (float)btnW, (float)btnH,
+                         hovered ? 0.3f : 0.2f, hovered ? 0.3f : 0.2f, hovered ? 0.4f : 0.28f, 0.9f,
+                         (float)fbW, (float)fbH);
+                drawTextAt(dtVAO, dtVBO, dtEBO, textProgram,
+                           (float)bx + 4, (float)by + 4, btnLabels[b],
+                           (float)fbW, (float)fbH, dtIndices.data(), TEXT_MAX_QUADS);
+            }
+        }
+
+        // Performance overlay
+        if (showPerformance) {
+            perfFrameCount++;
+            double now = glfwGetTime();
+            if (now - perfLastTime >= 0.5) {
+                perfFps = perfFrameCount / (float)(now - perfLastTime);
+                perfFrameCount = 0;
+                perfLastTime = now;
+            }
+            char perfStr[128];
+            snprintf(perfStr, sizeof(perfStr), "FPS: %.1f  Verts: %u  Tris: %u",
+                     perfFps, model.vertexCount, model.indexCount / 3);
+            int nq = drawTextAt(dtVAO, dtVBO, dtEBO, textProgram,
+                                (float)fbW - 250.0f, (float)fbH - 30.0f, perfStr,
+                                (float)fbW, (float)fbH, dtIndices.data(), TEXT_MAX_QUADS);
+        }
+
+        // HUD text hint
+        {
+            int hudNumQuads;
+            // Use a dynamic buffer
+            std::vector<char> textBuffer(20000);
             hudNumQuads = stb_easy_font_print(PANEL_WIDTH + 20, 12, (char*)hintText.c_str(),
-                                               nullptr, textBuffer, sizeof(textBuffer));
+                                               nullptr, textBuffer.data(), (int)textBuffer.size());
             glUseProgram(textProgram);
             glUniform2f(textScreenSize, (float)fbW, (float)fbH);
             glBindBuffer(GL_ARRAY_BUFFER, textVBO);
-            glBufferSubData(GL_ARRAY_BUFFER, 0, hudNumQuads * 64, textBuffer);
+            glBufferSubData(GL_ARRAY_BUFFER, 0, hudNumQuads * 64, textBuffer.data());
             glBindVertexArray(textVAO);
             glDrawElements(GL_TRIANGLES, hudNumQuads * 6, GL_UNSIGNED_INT, nullptr);
         }
@@ -881,8 +1460,6 @@ int main(int argc, char* argv[]) {
     }
 
     // Cleanup
-    delete[] model.vertices;
-    delete[] model.indices;
     glDeleteVertexArrays(1, &tessVAO);
     glDeleteBuffers(1, &tessVBO);
     glDeleteBuffers(1, &tessEBO);
