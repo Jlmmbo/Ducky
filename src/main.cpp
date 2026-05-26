@@ -533,7 +533,8 @@ int main(int argc, char* argv[]) {
     // === State variables ===
     bool showPerformance = false;
     bool wireframeOnly = false;
-    int colorScheme = 0;
+    int colorScheme = 0; // 0=Model, 1=Golden, 2=Rainbow, 3=Mono, 4=Warm
+    const char* colorSchemeNames[5] = {"Model", "Golden", "Rainbow", "Mono", "Warm"};
     int rotPreset = 1;
     float focalLength = 1.0f;
     int renderMode = 0; // 0=Perspective, 1=Stereographic, 2=Orthographic
@@ -542,6 +543,8 @@ int main(int argc, char* argv[]) {
     int windowedX = 0, windowedY = 0, windowedW = WINDOW_WIDTH, windowedH = WINDOW_HEIGHT;
     bool isFullscreen = false;
     bool orbitMode = false;
+    bool transparent = false;
+    float modelAlpha = 0.35f;
 
     const char* modelPath = argc > 1 ? argv[1] : "model.dky";
     Model model = LoadModel(modelPath);
@@ -555,8 +558,15 @@ int main(int argc, char* argv[]) {
 
     unsigned int dims = model.dimensions;
     int fpv = dims + 3;
+    std::vector<float> modelVertsBackup = model.vertices;
 
-    assignFaceColors(model, colorScheme);
+    auto applyColorScheme = [&](int scheme) {
+        if (scheme == 0) {
+            model.vertices = modelVertsBackup;
+        } else {
+            assignFaceColors(model, scheme - 1);
+        }
+    };
 
     auto edges = generateEdges(model.vertices.data(), model.vertexCount, dims, fpv,
                                 model.indices.data(), model.indexCount);
@@ -583,6 +593,7 @@ int main(int argc, char* argv[]) {
     if (!tessProgram) { glfwTerminate(); return -1; }
     GLuint tessUAspect = glGetUniformLocation(tessProgram, "uAspect");
     GLuint tessUDist3D = glGetUniformLocation(tessProgram, "uDist3D");
+    GLuint tessUAlpha = glGetUniformLocation(tessProgram, "uAlpha");
 
     // === Axes setup ===
     GLuint axesVAO, axesVBO;
@@ -680,7 +691,7 @@ int main(int argc, char* argv[]) {
     if (!textProgram) { glfwTerminate(); return -1; }
 
     char hintText[256];
-    snprintf(hintText, sizeof(hintText), "%uD  |  Rot:1-0,-=  |  E=wireframe V=preset C=color A=autorotate []=focal M=render R=reset  |  F11=FS F12=shot F1=perf  |  Right panel has all controls", dims);
+    snprintf(hintText, sizeof(hintText), "%uD  |  Rot:1-0,-=  |  E=wireframe V=preset C=color A=autorotate T=transparency []=focal M=render R=reset  |  F11=FS F12=shot F1=perf  |  Right panel has all controls", dims);
 
     GLuint textVAO, textVBO, textEBO;
     glGenVertexArrays(1, &textVAO);
@@ -868,6 +879,16 @@ int main(int argc, char* argv[]) {
             aPrev = aNow;
         }
 
+        // Toggle transparency (T)
+        {
+            static bool tPrev = false;
+            bool tNow = glfwGetKey(window, GLFW_KEY_T) == GLFW_PRESS;
+            bool ctrl = glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS ||
+                        glfwGetKey(window, GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS;
+            if (tNow && !tPrev && !ctrl) transparent = !transparent;
+            tPrev = tNow;
+        }
+
         // Color scheme cycle (C)
         {
             static bool cPrev = false;
@@ -875,8 +896,8 @@ int main(int argc, char* argv[]) {
             bool ctrl = glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS ||
                         glfwGetKey(window, GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS;
             if (cNow && !cPrev && !ctrl) {
-                colorScheme = (colorScheme + 1) % 4;
-                assignFaceColors(model, colorScheme);
+                colorScheme = (colorScheme + 1) % 5;
+                applyColorScheme(colorScheme);
             }
             cPrev = cNow;
         }
@@ -1034,8 +1055,8 @@ int main(int argc, char* argv[]) {
                             wireframeOnly = !wireframeOnly;
                             break;
                         case BTN_COLOR:
-                            colorScheme = (colorScheme + 1) % 4;
-                            assignFaceColors(model, colorScheme);
+                            colorScheme = (colorScheme + 1) % 5;
+                            applyColorScheme(colorScheme);
                             break;
                         case BTN_PRESET:
                             rotPreset = (rotPreset + 1) % 4;
@@ -1154,11 +1175,21 @@ int main(int argc, char* argv[]) {
 
         // Draw faces (skip in wireframe-only mode)
         if (!wireframeOnly) {
+            if (transparent) {
+                glEnable(GL_BLEND);
+                glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+                glDepthMask(GL_FALSE);
+            }
             glUseProgram(tessProgram);
             glUniform1f(tessUAspect, aspect);
             glUniform1f(tessUDist3D, 3.0f * focalLength);
+            glUniform1f(tessUAlpha, transparent ? modelAlpha : 1.0f);
             glBindVertexArray(tessVAO);
             glDrawElements(GL_TRIANGLES, model.indexCount, GL_UNSIGNED_INT, nullptr);
+            if (transparent) {
+                glDepthMask(GL_TRUE);
+                glDisable(GL_BLEND);
+            }
         }
 
         // Draw axes
@@ -1312,7 +1343,7 @@ int main(int argc, char* argv[]) {
                       dims, model.vertexCount, model.indexCount / 3,
                       edges.size(), transform.planeCount(),
                       focalLength,
-                      colorScheme == 0 ? "Golden" : colorScheme == 1 ? "Rainbow" : colorScheme == 2 ? "Mono" : "Warm",
+                       colorSchemeNames[colorScheme],
                       wireframeOnly ? "ON" : "OFF",
                       renderModeNames[renderMode]);
 
