@@ -325,7 +325,6 @@ static void processInput(GLFWwindow* window, TransformND& t) {
     if (glfwGetKey(window, GLFW_KEY_R) == GLFW_PRESS) {
         std::fill(t.angles.begin(), t.angles.end(), 0.0f);
         std::fill(t.translation.begin(), t.translation.end(), 0.0f);
-        std::fill(t.autoRotate.begin(), t.autoRotate.end(), false);
     }
 
 }
@@ -893,6 +892,18 @@ int main(int argc, char* argv[]) {
             ePrev = eNow;
         }
 
+        // Toggle all autorotate (A)
+        {
+            static bool aPrev = false;
+            bool aNow = glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS;
+            if (aNow && !aPrev) {
+                bool anyOn = false;
+                for (auto v : transform.autoRotate) if (v) anyOn = true;
+                std::fill(transform.autoRotate.begin(), transform.autoRotate.end(), !anyOn);
+            }
+            aPrev = aNow;
+        }
+
         // Color scheme cycle (C)
         {
             static bool cPrev = false;
@@ -1056,7 +1067,6 @@ int main(int argc, char* argv[]) {
                         case BTN_RESET:
                             std::fill(transform.angles.begin(), transform.angles.end(), 0.0f);
                             std::fill(transform.translation.begin(), transform.translation.end(), 0.0f);
-                            std::fill(transform.autoRotate.begin(), transform.autoRotate.end(), false);
                             break;
                         case BTN_WIREFRAME:
                             wireframeOnly = !wireframeOnly;
@@ -1142,7 +1152,7 @@ int main(int argc, char* argv[]) {
                 int btnW = 76, btnH = 24, gap = 4, colGap = 5;
                 int btnStartX = (int)((float)fbW - 260.0f + 8);
                 int btnStartY = (int)(10.0f + 155);
-                int btnCols = 4;
+                int btnCols = 3;
                 for (int b = 0; b < BTN_COUNT; b++) {
                     int col = b % btnCols;
                     int row = b / btnCols;
@@ -1219,11 +1229,17 @@ int main(int argc, char* argv[]) {
 
         // Draw faces (skip in wireframe-only mode)
         if (!wireframeOnly) {
+            if (renderMode == 1) {
+                glEnable(GL_POLYGON_OFFSET_FILL);
+                glPolygonOffset(1.0f, 1.0f);
+            }
             glUseProgram(tessProgram);
             glUniform1f(tessUAspect, aspect);
             glUniform1f(tessUDist3D, 3.0f * focalLength);
             glBindVertexArray(tessVAO);
             glDrawElements(GL_TRIANGLES, model.indexCount, GL_UNSIGNED_INT, nullptr);
+            if (renderMode == 1)
+                glDisable(GL_POLYGON_OFFSET_FILL);
         }
 
         // Draw axes
@@ -1400,10 +1416,12 @@ int main(int argc, char* argv[]) {
             int btnW = 76, btnH = 24, gap = 4, colGap = 5;
             int btnStartX = (int)infoX + 8;
             int btnStartY = (int)infoY + 155;
-            const char* btnLabels[] = {"Rst", "Wir", "Col", "Pre",
-                                        "Foc-", "Foc+", "Mode", "Slc-",
-                                        "Slc+", "FS", "Save", "Load", "Shot"};
-            int btnCols = 4;
+            const char* btnLabels[] = {"Reset All", "Wireframe", "Color Scheme",
+                                        "Rotation", "Focus -", "Focus +",
+                                        "Render Mode", "Slice -", "Slice +",
+                                        "Fullscreen", "Save State", "Load State",
+                                        "Screenshot"};
+            int btnCols = 3;
             for (int b = 0; b < BTN_COUNT; b++) {
                 int col = b % btnCols;
                 int row = b / btnCols;
