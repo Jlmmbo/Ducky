@@ -1,5 +1,7 @@
 # Ducky
 
+![Demo](Demo.gif)
+
 A real-time N-dimensional object viewer that renders hyperdimensional geometry through recursive perspective projection.
 
 ## Origin
