@@ -149,30 +149,6 @@ static void projectOrthographic(const float* in, float* out, int dims) {
     out[2] = dims > 2 ? in[2] : 0.0f;
 }
 
-static void projectSlicing(const float* in, float* out, int dims, float slicePos, float sliceWidth) {
-    // Project higher dims (5+) down to 4D using perspective
-    float tmp[128];
-    for (int i = 0; i < dims; i++) tmp[i] = in[i];
-    for (int d = dims - 1; d >= 4; d--) {
-        float dist = (float)d * 2.0f;
-        float depth = dist - tmp[d];
-        float scale = depth > 0.001f ? dist / depth : 10.0f;
-        for (int c = 0; c < d; c++)
-            tmp[c] *= scale;
-    }
-    // Slice along dim 3 (4th axis) for the 4D→3D step
-    float w = dims > 3 ? tmp[3] : 0.0f;
-    float dist = fabsf(w - slicePos);
-    if (dist > sliceWidth) {
-        out[0] = 0.0f; out[1] = 0.0f; out[2] = 0.0f;
-        return;
-    }
-    float alpha = 1.0f - dist / sliceWidth;
-    out[0] = tmp[0] * alpha;
-    out[1] = tmp[1] * alpha;
-    out[2] = tmp[2] * alpha;
-}
-
 static void projectStereographic(const float* in, float* out, int dims, float focalLength) {
     float radius = 0.0f;
     for (int i = 0; i < dims; i++)
@@ -571,10 +547,8 @@ int main(int argc, char* argv[]) {
     int colorScheme = 0;
     int rotPreset = 1;
     float focalLength = 1.0f;
-    float slicePos = 0.0f;
-    float sliceWidth = 0.5f;
-    int renderMode = 0; // 0=Perspective, 1=Slicing, 2=Stereographic, 3=Orthographic
-    const char* renderModeNames[] = {"Persp", "Slice", "Stereo", "Ortho"};
+    int renderMode = 0; // 0=Perspective, 1=Stereographic, 2=Orthographic
+    const char* renderModeNames[] = {"Perspective", "Stereographic", "Orthographic"};
     int fullscreenW = 0, fullscreenH = 0;
     int windowedX = 0, windowedY = 0, windowedW = WINDOW_WIDTH, windowedH = WINDOW_HEIGHT;
     bool isFullscreen = false;
@@ -761,8 +735,8 @@ int main(int argc, char* argv[]) {
 
     enum ButtonId {
         BTN_RESET, BTN_WIREFRAME, BTN_COLOR, BTN_PRESET,
-        BTN_FOCAL_DOWN, BTN_FOCAL_UP, BTN_MODE, BTN_SLICE_DOWN,
-        BTN_SLICE_UP, BTN_FS, BTN_SAVE, BTN_LOAD, BTN_SHOT,
+        BTN_FOCAL_DOWN, BTN_FOCAL_UP, BTN_MODE,
+        BTN_FS, BTN_SAVE, BTN_LOAD, BTN_SHOT,
         BTN_COUNT
     };
 
@@ -921,7 +895,7 @@ int main(int argc, char* argv[]) {
         {
             static bool mPrev = false;
             bool mNow = glfwGetKey(window, GLFW_KEY_M) == GLFW_PRESS;
-            if (mNow && !mPrev) renderMode = (renderMode + 1) % 4;
+            if (mNow && !mPrev) renderMode = (renderMode + 1) % 3;
             mPrev = mNow;
         }
 
@@ -1091,13 +1065,7 @@ int main(int argc, char* argv[]) {
                             focalLength = std::min(5.0f, focalLength + 0.1f);
                             break;
                         case BTN_MODE:
-                            renderMode = (renderMode + 1) % 4;
-                            break;
-                        case BTN_SLICE_DOWN:
-                            slicePos -= 0.1f;
-                            break;
-                        case BTN_SLICE_UP:
-                            slicePos += 0.1f;
+                            renderMode = (renderMode + 1) % 3;
                             break;
                         case BTN_FS: {
                             isFullscreen = !isFullscreen;
@@ -1151,7 +1119,7 @@ int main(int argc, char* argv[]) {
             if (mouse.leftPressed && clickedButton < 0) {
                 int btnW = 76, btnH = 24, gap = 4, colGap = 5;
                 int btnStartX = (int)((float)fbW - 260.0f + 8);
-                int btnStartY = (int)(10.0f + 155);
+                int btnStartY = (int)(10.0f + 145);
                 int btnCols = 3;
                 for (int b = 0; b < BTN_COUNT; b++) {
                     int col = b % btnCols;
@@ -1185,8 +1153,7 @@ int main(int argc, char* argv[]) {
             applyRotation(pos, transform);
             switch (renderMode) {
                 case 0: projectPerspective(pos, &projectedVerts[i * 6], dims, focalLength); break;
-                case 1: projectSlicing(pos, &projectedVerts[i * 6], dims, slicePos, sliceWidth); break;
-                case 2: projectStereographic(pos, &projectedVerts[i * 6], dims, focalLength); break;
+                case 1: projectStereographic(pos, &projectedVerts[i * 6], dims, focalLength); break;
                 default: projectOrthographic(pos, &projectedVerts[i * 6], dims); break;
             }
             projectedVerts[i * 6 + 3] = model.vertices[i * fpv + dims];
@@ -1229,17 +1196,11 @@ int main(int argc, char* argv[]) {
 
         // Draw faces (skip in wireframe-only mode)
         if (!wireframeOnly) {
-            if (renderMode == 1) {
-                glEnable(GL_POLYGON_OFFSET_FILL);
-                glPolygonOffset(1.0f, 1.0f);
-            }
             glUseProgram(tessProgram);
             glUniform1f(tessUAspect, aspect);
             glUniform1f(tessUDist3D, 3.0f * focalLength);
             glBindVertexArray(tessVAO);
             glDrawElements(GL_TRIANGLES, model.indexCount, GL_UNSIGNED_INT, nullptr);
-            if (renderMode == 1)
-                glDisable(GL_POLYGON_OFFSET_FILL);
         }
 
         // Draw axes
@@ -1269,12 +1230,13 @@ int main(int argc, char* argv[]) {
         // Draw wireframe edges
         {
             for (size_t i = 0; i < edges.size(); i++) {
-                edge3D[i * 6 + 0] = projectedVerts[edges[i].a * 6];
-                edge3D[i * 6 + 1] = projectedVerts[edges[i].a * 6 + 1];
-                edge3D[i * 6 + 2] = projectedVerts[edges[i].a * 6 + 2];
-                edge3D[i * 6 + 3] = projectedVerts[edges[i].b * 6];
-                edge3D[i * 6 + 4] = projectedVerts[edges[i].b * 6 + 1];
-                edge3D[i * 6 + 5] = projectedVerts[edges[i].b * 6 + 2];
+                int ia = edges[i].a, ib = edges[i].b;
+                edge3D[i * 6 + 0] = projectedVerts[ia * 6];
+                edge3D[i * 6 + 1] = projectedVerts[ia * 6 + 1];
+                edge3D[i * 6 + 2] = projectedVerts[ia * 6 + 2];
+                edge3D[i * 6 + 3] = projectedVerts[ib * 6];
+                edge3D[i * 6 + 4] = projectedVerts[ib * 6 + 1];
+                edge3D[i * 6 + 5] = projectedVerts[ib * 6 + 2];
             }
             glBindBuffer(GL_ARRAY_BUFFER, edgeVBO);
             glBufferSubData(GL_ARRAY_BUFFER, 0, edges.size() * 2 * 3 * sizeof(float), edge3D.data());
@@ -1373,7 +1335,7 @@ int main(int argc, char* argv[]) {
         {
             float infoX = (float)fbW - 260.0f;
             float infoY = 10.0f;
-            float infoH = 300.0f;
+            float infoH = 280.0f;
             drawRect(uiProgram, uiVAO, uiVBO,
                      infoX, infoY, 250.0f, infoH,
                      0.12f, 0.12f, 0.18f, 0.92f, (float)fbW, (float)fbH);
@@ -1388,15 +1350,13 @@ int main(int argc, char* argv[]) {
                       "Focal: %.1f\n"
                       "Scheme: %s\n"
                       "Wireframe: %s\n"
-                      "Mode: %s\n"
-                      "Slice: %.1f",
+                      "Mode: %s",
                       dims, model.vertexCount, model.indexCount / 3,
                       edges.size(), transform.planeCount(),
                       focalLength,
                       colorScheme == 0 ? "Golden" : colorScheme == 1 ? "Rainbow" : colorScheme == 2 ? "Mono" : "Warm",
                       wireframeOnly ? "ON" : "OFF",
-                      renderModeNames[renderMode],
-                      slicePos);
+                      renderModeNames[renderMode]);
 
             std::string infoStr(infoLines);
             size_t pos = 0;
@@ -1415,10 +1375,10 @@ int main(int argc, char* argv[]) {
             // Draw action buttons
             int btnW = 76, btnH = 24, gap = 4, colGap = 5;
             int btnStartX = (int)infoX + 8;
-            int btnStartY = (int)infoY + 155;
+            int btnStartY = (int)infoY + 145;
             const char* btnLabels[] = {"Reset All", "Wireframe", "Color Scheme",
                                         "Rotation", "Focus -", "Focus +",
-                                        "Render Mode", "Slice -", "Slice +",
+                                        "Render Mode",
                                         "Fullscreen", "Save State", "Load State",
                                         "Screenshot"};
             int btnCols = 3;
