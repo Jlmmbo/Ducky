@@ -7,7 +7,6 @@
 #include <cmath>
 #include <cstdio>
 #include <vector>
-#include <cstdlib>
 #include <cstring>
 #include <set>
 #include <map>
@@ -401,7 +400,6 @@ static int drawTextAt(GLuint vao, GLuint vbo, GLuint ebo, GLuint program,
                       float screenW, float screenH,
                       const unsigned int* indices, int maxQuads) {
     static std::vector<char> buf(2048);
-    if (buf.size() < 2048) buf.resize(2048);
     int nq = stb_easy_font_print(x, y, (char*)text, nullptr, buf.data(), (int)buf.size());
     if (nq <= 0 || nq > maxQuads) return 0;
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
@@ -690,7 +688,8 @@ int main(int argc, char* argv[]) {
     GLuint textProgram = createShaderProgram("shaders/text.vert", "shaders/text.frag");
     if (!textProgram) { glfwTerminate(); return -1; }
 
-    std::string hintText = std::to_string(dims) + "D  |  Rot:12 34 56 78 90 -=  |  E=wireframe V=preset C=color []=focal R=reset  |  F11=fs F12=shot F1=perf  |  Right panel has all controls";
+    char hintText[256];
+    snprintf(hintText, sizeof(hintText), "%uD  |  Rot:1-0,-=  |  E=wireframe V=preset C=color A=autorotate []=focal M=render R=reset  |  F11=FS F12=shot F1=perf  |  Right panel has all controls", dims);
 
     GLuint textVAO, textVBO, textEBO;
     glGenVertexArrays(1, &textVAO);
@@ -756,15 +755,47 @@ int main(int argc, char* argv[]) {
 
     double lastTime = glfwGetTime();
 
-    // Set drop callback
-    glfwSetWindowUserPointer(window, &model);
-    glfwSetDropCallback(window, [](GLFWwindow* win, int count, const char** paths) {
-        if (count > 0) {
-            std::cout << "Dropped file: " << paths[0] << std::endl;
+    // Reusable HUD text buffer
+    std::vector<char> textBuffer(20000);
+
+    auto takeScreenshot = [&]() {
+        glfwGetFramebufferSize(window, &fbW, &fbH);
+        std::vector<unsigned char> pixels(fbW * fbH * 3);
+        glReadPixels(0, 0, fbW, fbH, GL_RGB, GL_UNSIGNED_BYTE, pixels.data());
+        char screenshotPath[64];
+        time_t now = time(nullptr);
+        struct tm* tmNow = localtime(&now);
+        snprintf(screenshotPath, sizeof(screenshotPath), "screenshot_%04d%02d%02d_%02d%02d%02d.tga",
+                 tmNow->tm_year + 1900, tmNow->tm_mon + 1, tmNow->tm_mday,
+                 tmNow->tm_hour, tmNow->tm_min, tmNow->tm_sec);
+        writeTGA(screenshotPath, fbW, fbH, pixels.data());
+        std::cout << "Screenshot saved: " << screenshotPath << std::endl;
+    };
+
+    auto toggleFullscreen = [&]() {
+        isFullscreen = !isFullscreen;
+        if (isFullscreen) {
+            glfwGetWindowPos(window, &windowedX, &windowedY);
+            glfwGetWindowSize(window, &windowedW, &windowedH);
+            GLFWmonitor* monitor = glfwGetPrimaryMonitor();
+            const GLFWvidmode* mode = glfwGetVideoMode(monitor);
+            fullscreenW = mode->width;
+            fullscreenH = mode->height;
+            glfwSetWindowMonitor(window, monitor, 0, 0, fullscreenW, fullscreenH, mode->refreshRate);
+        } else {
+            GLFWmonitor* mon = glfwGetPrimaryMonitor();
+            int monX, monY, monW, monH;
+            glfwGetMonitorWorkarea(mon, &monX, &monY, &monW, &monH);
+            int restoreX = std::max(monX, std::min(windowedX, monX + monW - 100));
+            int restoreY = std::max(monY, std::min(windowedY, monY + monH - 100));
+            int restoreW = std::max(100, std::min(windowedW, monW));
+            int restoreH = std::max(100, std::min(windowedH, monH));
+            glfwSetWindowMonitor(window, nullptr, restoreX, restoreY, restoreW, restoreH, 0);
         }
-    });
+    };
 
     while (!glfwWindowShouldClose(window)) {
+        // ── Input ──
         // Mouse state
         {
             double mx, my;
@@ -786,6 +817,7 @@ int main(int argc, char* argv[]) {
 
         processInput(window, transform);
 
+        // ── Keyboard shortcuts ──
         // Save/Load state
         {
             bool ctrl = glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS ||
@@ -803,28 +835,7 @@ int main(int argc, char* argv[]) {
         {
             static bool f11Prev = false;
             bool f11Now = glfwGetKey(window, GLFW_KEY_F11) == GLFW_PRESS;
-            if (f11Now && !f11Prev) {
-                isFullscreen = !isFullscreen;
-                if (isFullscreen) {
-                    glfwGetWindowPos(window, &windowedX, &windowedY);
-                    glfwGetWindowSize(window, &windowedW, &windowedH);
-                    GLFWmonitor* monitor = glfwGetPrimaryMonitor();
-                    const GLFWvidmode* mode = glfwGetVideoMode(monitor);
-                    fullscreenW = mode->width;
-                    fullscreenH = mode->height;
-                    glfwSetWindowMonitor(window, monitor, 0, 0, fullscreenW, fullscreenH, mode->refreshRate);
-                } else {
-                    GLFWmonitor* mon = glfwGetPrimaryMonitor();
-                    const GLFWvidmode* vm = glfwGetVideoMode(mon);
-                    int monX, monY, monW, monH;
-                    glfwGetMonitorWorkarea(mon, &monX, &monY, &monW, &monH);
-                    int restoreX = std::max(monX, std::min(windowedX, monX + monW - 100));
-                    int restoreY = std::max(monY, std::min(windowedY, monY + monH - 100));
-                    int restoreW = std::max(100, std::min(windowedW, monW));
-                    int restoreH = std::max(100, std::min(windowedH, monH));
-                    glfwSetWindowMonitor(window, nullptr, restoreX, restoreY, restoreW, restoreH, 0);
-                }
-            }
+            if (f11Now && !f11Prev) toggleFullscreen();
             f11Prev = f11Now;
         }
 
@@ -832,19 +843,7 @@ int main(int argc, char* argv[]) {
         {
             static bool f12Prev = false;
             bool f12Now = glfwGetKey(window, GLFW_KEY_F12) == GLFW_PRESS;
-            if (f12Now && !f12Prev) {
-                glfwGetFramebufferSize(window, &fbW, &fbH);
-                std::vector<unsigned char> pixels(fbW * fbH * 3);
-                glReadPixels(0, 0, fbW, fbH, GL_RGB, GL_UNSIGNED_BYTE, pixels.data());
-                char screenshotPath[64];
-                time_t now = time(nullptr);
-                struct tm* tmNow = localtime(&now);
-                snprintf(screenshotPath, sizeof(screenshotPath), "screenshot_%04d%02d%02d_%02d%02d%02d.tga",
-                         tmNow->tm_year + 1900, tmNow->tm_mon + 1, tmNow->tm_mday,
-                         tmNow->tm_hour, tmNow->tm_min, tmNow->tm_sec);
-                writeTGA(screenshotPath, fbW, fbH, pixels.data());
-                std::cout << "Screenshot saved: " << screenshotPath << std::endl;
-            }
+            if (f12Now && !f12Prev) takeScreenshot();
             f12Prev = f12Now;
         }
 
@@ -941,16 +940,14 @@ int main(int argc, char* argv[]) {
         // Mouse orbit (right-click drag)
         {
             if (mouse.rightPressed) {
-                int nSlidersTmp = transform.planeCount();
-                float panelHTmp = PAD * 2.0f + 24.0f + (float)nSlidersTmp * SLIDER_HEIGHT + 10.0f;
+                int nSliders = transform.planeCount();
+                float panelH = PAD * 2.0f + 24.0f + (float)nSliders * SLIDER_HEIGHT + 10.0f;
                 bool overSlider = mouse.x >= 10.0f && mouse.x <= 10.0f + PANEL_WIDTH &&
-                                  mouse.y >= 10.0f && mouse.y <= 10.0f + panelHTmp;
+                                  mouse.y >= 10.0f && mouse.y <= 10.0f + panelH;
                 if (!overSlider && !mouse.left)
                     orbitMode = true;
             }
-            if (mouse.rightReleased) {
-                orbitMode = false;
-            }
+            if (mouse.rightReleased) orbitMode = false;
             if (orbitMode && mouse.right && mouse.moved) {
                 double dx = mouse.x - mouse.lastX;
                 double dy = mouse.y - mouse.lastY;
@@ -1067,48 +1064,18 @@ int main(int argc, char* argv[]) {
                         case BTN_MODE:
                             renderMode = (renderMode + 1) % 3;
                             break;
-                        case BTN_FS: {
-                            isFullscreen = !isFullscreen;
-                            if (isFullscreen) {
-                                glfwGetWindowPos(window, &windowedX, &windowedY);
-                                glfwGetWindowSize(window, &windowedW, &windowedH);
-                                GLFWmonitor* monitor = glfwGetPrimaryMonitor();
-                                const GLFWvidmode* mode = glfwGetVideoMode(monitor);
-                                fullscreenW = mode->width;
-                                fullscreenH = mode->height;
-                                glfwSetWindowMonitor(window, monitor, 0, 0, fullscreenW, fullscreenH, mode->refreshRate);
-                            } else {
-                                GLFWmonitor* mon = glfwGetPrimaryMonitor();
-                                int monX, monY, monW, monH;
-                                glfwGetMonitorWorkarea(mon, &monX, &monY, &monW, &monH);
-                                int restoreX = std::max(monX, std::min(windowedX, monX + monW - 100));
-                                int restoreY = std::max(monY, std::min(windowedY, monY + monH - 100));
-                                int restoreW = std::max(100, std::min(windowedW, monW));
-                                int restoreH = std::max(100, std::min(windowedH, monH));
-                                glfwSetWindowMonitor(window, nullptr, restoreX, restoreY, restoreW, restoreH, 0);
-                            }
+                        case BTN_FS:
+                            toggleFullscreen();
                             break;
-                        }
                         case BTN_SAVE:
                             saveState("ducky_state.txt", transform);
                             break;
                         case BTN_LOAD:
                             loadState("ducky_state.txt", transform);
                             break;
-                        case BTN_SHOT: {
-                            glfwGetFramebufferSize(window, &fbW, &fbH);
-                            std::vector<unsigned char> pixels(fbW * fbH * 3);
-                            glReadPixels(0, 0, fbW, fbH, GL_RGB, GL_UNSIGNED_BYTE, pixels.data());
-                            char screenshotPath[64];
-                            time_t now = time(nullptr);
-                            struct tm* tmNow = localtime(&now);
-                            snprintf(screenshotPath, sizeof(screenshotPath), "screenshot_%04d%02d%02d_%02d%02d%02d.tga",
-                                     tmNow->tm_year + 1900, tmNow->tm_mon + 1, tmNow->tm_mday,
-                                     tmNow->tm_hour, tmNow->tm_min, tmNow->tm_sec);
-                            writeTGA(screenshotPath, fbW, fbH, pixels.data());
-                            std::cout << "Screenshot saved: " << screenshotPath << std::endl;
+                        case BTN_SHOT:
+                            takeScreenshot();
                             break;
-                        }
                     }
                 }
                 dragSlider = -1;
@@ -1418,11 +1385,8 @@ int main(int argc, char* argv[]) {
 
         // HUD text hint
         {
-            int hudNumQuads;
-            // Use a dynamic buffer
-            std::vector<char> textBuffer(20000);
-            hudNumQuads = stb_easy_font_print(PANEL_WIDTH + 20, 12, (char*)hintText.c_str(),
-                                               nullptr, textBuffer.data(), (int)textBuffer.size());
+            int hudNumQuads = stb_easy_font_print(PANEL_WIDTH + 20, 12, hintText,
+                                                  nullptr, textBuffer.data(), (int)textBuffer.size());
             glUseProgram(textProgram);
             glUniform2f(textScreenSize, (float)fbW, (float)fbH);
             glBindBuffer(GL_ARRAY_BUFFER, textVBO);
