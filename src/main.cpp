@@ -544,6 +544,7 @@ int main(int argc, char* argv[]) {
     bool isFullscreen = false;
     bool orbitMode = false;
     bool transparent = false;
+    bool lighting = true;
     float modelAlpha = 0.35f;
 
     const char* modelPath = argc > 1 ? argv[1] : "model.dky";
@@ -594,6 +595,7 @@ int main(int argc, char* argv[]) {
     GLuint tessUAspect = glGetUniformLocation(tessProgram, "uAspect");
     GLuint tessUDist3D = glGetUniformLocation(tessProgram, "uDist3D");
     GLuint tessUAlpha = glGetUniformLocation(tessProgram, "uAlpha");
+    GLuint tessULighting = glGetUniformLocation(tessProgram, "uLighting");
 
     // === Axes setup ===
     GLuint axesVAO, axesVBO;
@@ -708,7 +710,7 @@ int main(int argc, char* argv[]) {
     if (!textProgram) { glfwTerminate(); return -1; }
 
     char hintText[256];
-    snprintf(hintText, sizeof(hintText), "%uD  |  Rot:1-0,-=  |  E=wireframe V=preset C=color A=autorotate T=transparency []=focal M=render R=reset  |  F11=FS F12=shot F1=perf  |  Right panel has all controls", dims);
+    snprintf(hintText, sizeof(hintText), "%uD  |  Rot:1-0,-=  |  E=wireframe V=preset C=color A=autorotate T=transparency L=lighting []=focal M=render R=reset  |  F11=FS F12=shot F1=perf  |  Right panel has all controls", dims);
 
     GLuint textVAO, textVBO, textEBO;
     glGenVertexArrays(1, &textVAO);
@@ -754,7 +756,7 @@ int main(int argc, char* argv[]) {
     enum ButtonId {
         BTN_RESET, BTN_WIREFRAME, BTN_COLOR, BTN_PRESET,
         BTN_FOCAL_DOWN, BTN_FOCAL_UP, BTN_MODE,
-        BTN_FS, BTN_SAVE, BTN_LOAD, BTN_SHOT,
+        BTN_FS, BTN_SAVE, BTN_LOAD, BTN_SHOT, BTN_LIGHTING,
         BTN_COUNT
     };
 
@@ -907,6 +909,16 @@ int main(int argc, char* argv[]) {
                         glfwGetKey(window, GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS;
             if (tNow && !tPrev && !ctrl) transparent = !transparent;
             tPrev = tNow;
+        }
+
+        // Lighting toggle (L)
+        {
+            static bool lPrev = false;
+            bool lNow = glfwGetKey(window, GLFW_KEY_L) == GLFW_PRESS;
+            bool ctrl = glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS ||
+                        glfwGetKey(window, GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS;
+            if (lNow && !lPrev && !ctrl) lighting = !lighting;
+            lPrev = lNow;
         }
 
         // Color scheme cycle (C)
@@ -1110,6 +1122,9 @@ int main(int argc, char* argv[]) {
                         case BTN_SHOT:
                             takeScreenshot();
                             break;
+                        case BTN_LIGHTING:
+                            lighting = !lighting;
+                            break;
                     }
                 }
                 dragSlider = -1;
@@ -1296,6 +1311,7 @@ int main(int argc, char* argv[]) {
                     glUniform1f(tessUAspect, aspect);
                     glUniform1f(tessUDist3D, 3.0f * focalLength);
                     glUniform1f(tessUAlpha, transparent ? modelAlpha : 1.0f);
+                    glUniform1f(tessULighting, lighting ? 1.0f : 0.0f);
                     glBindVertexArray(subVAO);
                     glDrawElements(GL_TRIANGLES, totalSubTris * 3, GL_UNSIGNED_INT, nullptr);
                     if (transparent) {
@@ -1343,6 +1359,7 @@ int main(int argc, char* argv[]) {
                     glUniform1f(tessUAspect, aspect);
                     glUniform1f(tessUDist3D, 3.0f * focalLength);
                     glUniform1f(tessUAlpha, transparent ? modelAlpha : 1.0f);
+                    glUniform1f(tessULighting, lighting ? 1.0f : 0.0f);
                     glBindVertexArray(tessVAO);
                     glDrawElements(GL_TRIANGLES, model.indexCount, GL_UNSIGNED_INT, nullptr);
                     if (transparent) {
@@ -1533,12 +1550,14 @@ int main(int argc, char* argv[]) {
                       "Focal: %.1f\n"
                       "Scheme: %s\n"
                       "Wireframe: %s\n"
+                      "Lighting: %s\n"
                       "Mode: %s",
                       dims, model.vertexCount, model.indexCount / 3,
                       edges.size(), transform.planeCount(),
                       focalLength,
                        colorSchemeNames[colorScheme],
                       wireframeOnly ? "ON" : "OFF",
+                      lighting ? "ON" : "OFF",
                       renderModeNames[renderMode]);
 
             std::string infoStr(infoLines);
@@ -1563,7 +1582,7 @@ int main(int argc, char* argv[]) {
                                         "Rotation", "Focus -", "Focus +",
                                         "Render Mode",
                                         "Fullscreen", "Save State", "Load State",
-                                        "Screenshot"};
+                                        "Screenshot", "Lighting"};
             int btnCols = 3;
             for (int b = 0; b < BTN_COUNT; b++) {
                 int col = b % btnCols;

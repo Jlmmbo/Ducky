@@ -19,6 +19,7 @@ Ducky visualizes N-dimensional objects (3D, 4D, 5D, ...) by recursively projecti
 - **Per-Plane Auto-Rotate**: Toggle auto-rotation on/off for each individual rotation plane (green A / dark M)
 - **GUI Button Panel**: All controls accessible via clickable buttons on the right panel
 - **Face-Colored Rendering**: 4 color schemes — Golden ratio, Rainbow, Monochrome, Warm
+- **Lighting Toggle**: Toggle per-face diffuse lighting on/off (`L` key or button)
 - **Coordinate Axes**: Visualize all N axes with distinct colors
 - **Wireframe Overlay**: Auto-generated edges with depth-independent rendering (toggle with E)
 - **Right-Click Orbit**: Intuitive 3D orbit by right-click dragging off the slider panel
@@ -103,6 +104,7 @@ For 6D+ models, additional planes are accessible with Ctrl+ letter pairs:
 |-----|--------|
 | `V` | Cycle auto-rotation preset (all on, all off, alternating, every 3rd) |
 | `C` | Cycle color scheme (Golden → Rainbow → Monochrome → Warm) |
+| `L` | Toggle per-face lighting on/off |
 | `E` | Toggle wireframe-only mode (edges only, no faces) |
 | `[` / `]` | Decrease / increase focal length (perspective depth) |
 | `F11` | Toggle fullscreen |
@@ -118,7 +120,7 @@ A left-side panel provides draggable sliders for every rotation plane:
 - **Click the toggle square** to toggle per-plane auto-rotation (green `A` = on, dark `M` = off)
 
 #### Button Panel
-A right-side panel contains clickable buttons for all actions: Reset, Wireframe, Color, Preset, Focal±, Undo, Redo, Fullscreen, Save, Load, and Screenshot.
+A right-side panel contains clickable buttons for all actions: Reset, Wireframe, Color, Preset, Focal±, Render Mode, Fullscreen, Save, Load, Screenshot, and Lighting.
 
 #### Right-Click Orbit
 Right-click and drag anywhere outside the slider panel to orbit the view (rotates primary rotation planes).

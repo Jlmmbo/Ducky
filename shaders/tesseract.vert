@@ -3,6 +3,7 @@ layout(location = 0) in vec3 aPos;
 layout(location = 1) in vec3 aColor;
 
 flat out vec3 vColor;
+out vec3 vPos;
 
 uniform float uAspect;
 uniform float uDist3D;
@@ -18,4 +19,5 @@ void main() {
     float clip_z = z_eye * (Z_FAR + Z_NEAR) / (Z_NEAR - Z_FAR) + 2.0 * Z_FAR * Z_NEAR / (Z_NEAR - Z_FAR);
     gl_Position = vec4(aPos.x * uDist3D / uAspect, aPos.y * uDist3D, clip_z, perspDiv);
     vColor = aColor;
+    vPos = aPos;
 }
