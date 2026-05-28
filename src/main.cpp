@@ -25,7 +25,6 @@
 
 constexpr int WINDOW_WIDTH = 1920;
 constexpr int WINDOW_HEIGHT = 1920;
-constexpr float MOVE_SPEED = 0.02f;
 constexpr float ROTATE_SPEED = 0.02f;
 constexpr float AXIS_LENGTH = 1.5f;
 

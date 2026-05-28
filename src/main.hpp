@@ -1,10 +1,8 @@
 #include <cstring>
 #include <cstdio>
-#include <cctype>
 #include <iostream>
 #include <cstdlib>
 #include <vector>
-#include <string>
 
 struct Model {
     std::vector<float> vertices;
