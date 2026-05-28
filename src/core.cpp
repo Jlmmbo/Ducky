@@ -24,13 +24,17 @@ int TransformND::planeIndex(int i, int j) const {
     return idx + (j - i - 1);
 }
 
-Model LoadModel(const char* path) {
-    Model model;
+// ── Model ──
 
+Model::Model(const char* path) {
+    load(path);
+}
+
+void Model::load(const char* path) {
     FILE* file = fopen(path, "r");
     if (!file) {
         std::cerr << "Failed to open model file: " << path << std::endl;
-        return model;
+        return;
     }
 
     char line[1024];
@@ -60,12 +64,12 @@ Model LoadModel(const char* path) {
         else idxCount += 3;
     }
 
-    model.dimensions = dims;
+    dimensions_ = dims;
     int fpv = dims + 3;
-    model.vertexCount = vertCount;
-    model.indexCount = idxCount;
-    model.vertices.resize(vertCount * fpv);
-    model.indices.resize(idxCount);
+    vertexCount_ = vertCount;
+    indexCount_ = idxCount;
+    vertices_.resize(vertCount * fpv);
+    indices_.resize(idxCount);
 
     rewind(file);
     section = false;
@@ -102,29 +106,47 @@ Model LoadModel(const char* path) {
             }
             if (parsed == fpv) {
                 for (int i = 0; i < fpv; i++)
-                    model.vertices[vi * fpv + i] = vals[i];
+                    vertices_[vi * fpv + i] = vals[i];
                 vi++;
             }
         } else {
             unsigned int i0, i1, i2;
             if (sscanf(line, "%u %u %u", &i0, &i1, &i2) == 3) {
-                if (i0 >= model.vertexCount || i1 >= model.vertexCount || i2 >= model.vertexCount) {
+                if (i0 >= vertexCount_ || i1 >= vertexCount_ || i2 >= vertexCount_) {
                     std::cerr << "Index out of bounds in " << path << ": "
                               << i0 << " " << i1 << " " << i2
-                              << " (vertexCount=" << model.vertexCount << ")" << std::endl;
+                              << " (vertexCount=" << vertexCount_ << ")" << std::endl;
                     continue;
                 }
-                model.indices[ii] = i0;
-                model.indices[ii + 1] = i1;
-                model.indices[ii + 2] = i2;
+                indices_[ii] = i0;
+                indices_[ii + 1] = i1;
+                indices_[ii + 2] = i2;
                 ii += 3;
             }
         }
     }
 
     fclose(file);
-    return model;
 }
+
+void Model::backupVertices() {
+    verticesBackup_ = vertices_;
+}
+
+void Model::restoreVertices() {
+    if (!verticesBackup_.empty()) vertices_ = verticesBackup_;
+}
+
+void Model::generateEdges() {
+    edges_ = dky::generateEdges(vertices_.data(), vertexCount_, dimensions_, fpv(),
+                                indices_.data(), indexCount_);
+}
+
+void Model::assignFaceColors(int colorScheme) {
+    dky::assignFaceColors(vertices_.data(), indices_.data(), indexCount_, dimensions_, colorScheme);
+}
+
+// ── Math helpers ──
 
 void hslToRgb(float h, float s, float l, float& r, float& g, float& b) {
     auto hueToRgb = [](float p, float q, float t) {
@@ -280,11 +302,11 @@ std::vector<Edge> generateEdges(const float* vertices, unsigned int vertexCount,
     return edges;
 }
 
-void assignFaceColors(Model& model, int colorScheme) {
-    if (model.vertexCount == 0 || model.indexCount == 0) return;
-    unsigned int dims = model.dimensions;
+void assignFaceColors(float* vertices, const unsigned int* indices,
+                      unsigned int indexCount, unsigned int dims, int colorScheme) {
+    if (indexCount == 0) return;
     int fpv = dims + 3;
-    unsigned int faces = model.indexCount / 3;
+    unsigned int faces = indexCount / 3;
     const float goldenRatio = 0.618033988749895f;
 
     for (unsigned int f = 0; f < faces; f++) {
@@ -300,10 +322,10 @@ void assignFaceColors(Model& model, int colorScheme) {
         float r, g, b;
         hslToRgb(h, s, l, r, g, b);
         for (int j = 0; j < 3; j++) {
-            int vi = model.indices[f * 3 + j];
-            model.vertices[vi * fpv + dims] = r;
-            model.vertices[vi * fpv + dims + 1] = g;
-            model.vertices[vi * fpv + dims + 2] = b;
+            int vi = indices[f * 3 + j];
+            vertices[vi * fpv + dims] = r;
+            vertices[vi * fpv + dims + 1] = g;
+            vertices[vi * fpv + dims + 2] = b;
         }
     }
 }

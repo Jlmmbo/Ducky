@@ -16,7 +16,7 @@
 
 namespace dky {
 
-static void processInput(GLFWwindow* window, TransformND& t) {
+static void processInput(GLFWwindow* window, Camera& camera) {
     constexpr float ROTATE_SPEED = 0.02f;
     int planeKeysPos[] = {
         GLFW_KEY_1, GLFW_KEY_3, GLFW_KEY_5, GLFW_KEY_7,
@@ -27,11 +27,11 @@ static void processInput(GLFWwindow* window, TransformND& t) {
         GLFW_KEY_0, GLFW_KEY_EQUAL
     };
 
-    for (int i = 0; i < 6 && i < t.planeCount(); i++) {
+    for (int i = 0; i < 6 && i < camera.planeCount(); i++) {
         if (glfwGetKey(window, planeKeysPos[i]) == GLFW_PRESS)
-            t.angles[i] += ROTATE_SPEED;
+            camera.angles()[i] += ROTATE_SPEED;
         if (glfwGetKey(window, planeKeysNeg[i]) == GLFW_PRESS)
-            t.angles[i] -= ROTATE_SPEED;
+            camera.angles()[i] -= ROTATE_SPEED;
     }
 
     int extraKeysPos[] = {
@@ -45,16 +45,16 @@ static void processInput(GLFWwindow* window, TransformND& t) {
     bool ctrl = glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS ||
                 glfwGetKey(window, GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS;
 
-    for (int i = 0; i < 6 && (6 + i) < t.planeCount(); i++) {
+    for (int i = 0; i < 6 && (6 + i) < camera.planeCount(); i++) {
         if (ctrl && glfwGetKey(window, extraKeysPos[i]) == GLFW_PRESS)
-            t.angles[6 + i] += ROTATE_SPEED;
+            camera.angles()[6 + i] += ROTATE_SPEED;
         if (ctrl && glfwGetKey(window, extraKeysNeg[i]) == GLFW_PRESS)
-            t.angles[6 + i] -= ROTATE_SPEED;
+            camera.angles()[6 + i] -= ROTATE_SPEED;
     }
 
     if (glfwGetKey(window, GLFW_KEY_R) == GLFW_PRESS) {
-        std::fill(t.angles.begin(), t.angles.end(), 0.0f);
-        std::fill(t.translation.begin(), t.translation.end(), 0.0f);
+        std::fill(camera.angles().begin(), camera.angles().end(), 0.0f);
+        std::fill(camera.translation().begin(), camera.translation().end(), 0.0f);
     }
 }
 
@@ -92,39 +92,29 @@ Application::Application(int argc, char* argv[])
     glEnable(GL_DEPTH_TEST);
 
     const char* modelPath = argc > 1 ? argv[1] : "model.dky";
-    model_ = LoadModel(modelPath);
-    if (model_.vertexCount == 0) {
+    model_ = Model(modelPath);
+    if (model_.vertexCount() == 0) {
         std::cerr << "Failed to load model: " << modelPath << "\n";
         glfwTerminate();
         return;
     }
-    std::cout << "Loaded " << model_.dimensions << "D model: "
-              << model_.vertexCount << " vertices, " << model_.indexCount << " indices" << std::endl;
+    std::cout << "Loaded " << model_.dimensions() << "D model: "
+              << model_.vertexCount() << " vertices, " << model_.indexCount() << " indices" << std::endl;
 
-    dims_ = model_.dimensions;
-    fpv_ = dims_ + 3;
-    modelVertsBackup_ = model_.vertices;
+    model_.backupVertices();
+    model_.generateEdges();
+    std::cout << "Generated " << model_.edgeCount() << " edges" << std::endl;
 
-    edges_ = generateEdges(model_.vertices.data(), model_.vertexCount, dims_, fpv_,
-                           model_.indices.data(), model_.indexCount);
-    std::cout << "Generated " << edges_.size() << " edges" << std::endl;
+    renderer_ = new Renderer(model_, model_.edges());
 
-    renderer_ = new Renderer(model_, edges_);
-
-    transform_.dims = dims_;
-    transform_.angles.resize(transform_.planeCount(), 0.0f);
-    transform_.autoRotate.resize(transform_.planeCount(), true);
-    transform_.translation.resize(dims_, 0.0f);
-
-    projectedVerts_.resize(model_.vertexCount * 6);
-    axis3D_.resize(dims_ * 2 * 6);
-    edge3D_.resize(edges_.size() * (32 + 1) * 3);
+    camera_ = new Camera(model_.dimensions());
 
     perfLastTime_ = glfwGetTime();
     lastTime_ = glfwGetTime();
 }
 
 Application::~Application() {
+    delete camera_;
     delete renderer_;
     if (window_) {
         glfwDestroyWindow(window_);
@@ -169,11 +159,11 @@ void Application::toggleFullscreen() {
 }
 
 int Application::run() {
-    if (!window_ || model_.vertexCount == 0) return -1;
+    if (!window_ || model_.vertexCount() == 0) return -1;
 
     while (!glfwWindowShouldClose(window_)) {
         handleMouseInput();
-        processInput(window_, transform_);
+        processInput(window_, *camera_);
         handleKeyboardShortcuts();
         handleOrbit();
 
@@ -182,20 +172,10 @@ int Application::run() {
             double now = glfwGetTime();
             float dt = std::min((float)(now - lastTime_), 0.05f);
             lastTime_ = now;
-
-            for (int i = 0; i < transform_.planeCount(); i++) {
-                if (transform_.autoRotate[i])
-                    transform_.angles[i] += dt * 0.5f * (1 + (i % 3));
-            }
+            camera_->updateAutoRotation(dt);
         }
 
-        // Wrap angles
-        for (int i = 0; i < transform_.planeCount(); i++) {
-            float a = transform_.angles[i];
-            transform_.angles[i] = fmodf(a + PI, 2.0f * PI);
-            if (transform_.angles[i] < 0) transform_.angles[i] += 2.0f * PI;
-            transform_.angles[i] -= PI;
-        }
+        camera_->wrapAngles();
 
         glfwGetFramebufferSize(window_, &fbW_, &fbH_);
         renderer_->setFramebufferSize(fbW_, fbH_);
@@ -203,25 +183,28 @@ int Application::run() {
 
         char titleBuf[128];
         snprintf(titleBuf, sizeof(titleBuf), "Ducky - %uD (%u verts, %zu edges) [F1=perf]",
-                 dims_, model_.vertexCount, edges_.size());
+                 model_.dimensions(), model_.vertexCount(), model_.edgeCount());
         glfwSetWindowTitle(window_, titleBuf);
 
         handleSliders();
-        processProjection();
+
+        camera_->projectVertices(model_.vertexData(), model_.vertexCount(),
+                                model_.dimensions(), model_.fpv());
 
         // Render
         renderer_->setFramebufferSize(fbW_, fbH_);
         renderer_->clear();
-        renderer_->renderFaces(model_, transform_,
-                               projectedVerts_.data(), model_.vertexCount,
-                               model_.indices.data(), model_.indexCount,
-                               renderMode_, wireframeOnly_,
-                               focalLength_, lighting_,
+        renderer_->renderFaces(model_, camera_->transform(),
+                               camera_->projectedVerts(), model_.vertexCount(),
+                               model_.indexData(), model_.indexCount(),
+                               (int)camera_->renderMode(), wireframeOnly_,
+                               camera_->focalLength(), lighting_,
                                transparent_, modelAlpha_);
-        renderer_->renderAxes(transform_, focalLength_);
-        renderer_->renderEdges(model_, transform_,
-                               projectedVerts_.data(),
-                               renderMode_, focalLength_, edges_);
+        renderer_->renderAxes(camera_->transform(), camera_->focalLength());
+        renderer_->renderEdges(model_, camera_->transform(),
+                               camera_->projectedVerts(),
+                               (int)camera_->renderMode(), camera_->focalLength(),
+                               model_.edges());
 
         // UI overlay
         glDisable(GL_DEPTH_TEST);
@@ -262,8 +245,8 @@ void Application::handleKeyboardShortcuts() {
         static bool sPrev = false, lPrev = false;
         bool sNow = glfwGetKey(window_, GLFW_KEY_S) == GLFW_PRESS;
         bool lNow = glfwGetKey(window_, GLFW_KEY_L) == GLFW_PRESS;
-        if (ctrl && sNow && !sPrev) saveState("ducky_state.txt", transform_);
-        if (ctrl && lNow && !lPrev) loadState("ducky_state.txt", transform_);
+        if (ctrl && sNow && !sPrev) camera_->saveState("ducky_state.txt");
+        if (ctrl && lNow && !lPrev) camera_->loadState("ducky_state.txt");
         sPrev = sNow;
         lPrev = lNow;
     }
@@ -306,8 +289,8 @@ void Application::handleKeyboardShortcuts() {
         bool aNow = glfwGetKey(window_, GLFW_KEY_A) == GLFW_PRESS;
         if (aNow && !aPrev) {
             bool anyOn = false;
-            for (auto v : transform_.autoRotate) if (v) anyOn = true;
-            std::fill(transform_.autoRotate.begin(), transform_.autoRotate.end(), !anyOn);
+            for (auto v : camera_->autoRotateFlags()) if (v) anyOn = true;
+            std::fill(camera_->autoRotateFlags().begin(), camera_->autoRotateFlags().end(), !anyOn);
         }
         aPrev = aNow;
     }
@@ -335,9 +318,9 @@ void Application::handleKeyboardShortcuts() {
         if (cNow && !cPrev && !ctrl) {
             colorScheme_ = (colorScheme_ + 1) % 5;
             if (colorScheme_ == 0) {
-                model_.vertices = modelVertsBackup_;
+                model_.restoreVertices();
             } else {
-                assignFaceColors(model_, colorScheme_ - 1);
+                model_.assignFaceColors(colorScheme_ - 1);
             }
         }
         cPrev = cNow;
@@ -347,7 +330,7 @@ void Application::handleKeyboardShortcuts() {
     {
         static bool mPrev = false;
         bool mNow = glfwGetKey(window_, GLFW_KEY_M) == GLFW_PRESS;
-        if (mNow && !mPrev) renderMode_ = (renderMode_ + 1) % 3;
+        if (mNow && !mPrev) camera_->cycleRenderMode();
         mPrev = mNow;
     }
 
@@ -357,11 +340,12 @@ void Application::handleKeyboardShortcuts() {
         bool vNow = glfwGetKey(window_, GLFW_KEY_V) == GLFW_PRESS;
         if (vNow && !vPrev) {
             rotPreset_ = (rotPreset_ + 1) % 4;
+            auto& ar = camera_->autoRotateFlags();
             switch (rotPreset_) {
-                case 0: std::fill(transform_.autoRotate.begin(), transform_.autoRotate.end(), false); break;
-                case 1: std::fill(transform_.autoRotate.begin(), transform_.autoRotate.end(), true); break;
-                case 2: for (int i = 0; i < transform_.planeCount(); i++) transform_.autoRotate[i] = (i % 2 == 0); break;
-                case 3: for (int i = 0; i < transform_.planeCount(); i++) transform_.autoRotate[i] = (i % 3 == 0); break;
+                case 0: std::fill(ar.begin(), ar.end(), false); break;
+                case 1: std::fill(ar.begin(), ar.end(), true); break;
+                case 2: for (int i = 0; i < camera_->planeCount(); i++) ar[i] = (i % 2 == 0); break;
+                case 3: for (int i = 0; i < camera_->planeCount(); i++) ar[i] = (i % 3 == 0); break;
             }
         }
         vPrev = vNow;
@@ -372,8 +356,10 @@ void Application::handleKeyboardShortcuts() {
         static bool leftBracketPrev = false, rightBracketPrev = false;
         bool leftBracketNow = glfwGetKey(window_, GLFW_KEY_LEFT_BRACKET) == GLFW_PRESS;
         bool rightBracketNow = glfwGetKey(window_, GLFW_KEY_RIGHT_BRACKET) == GLFW_PRESS;
-        if (leftBracketNow && !leftBracketPrev && !ctrl) focalLength_ = std::max(0.1f, focalLength_ - 0.1f);
-        if (rightBracketNow && !rightBracketPrev && !ctrl) focalLength_ = std::min(5.0f, focalLength_ + 0.1f);
+        if (leftBracketNow && !leftBracketPrev && !ctrl)
+            camera_->setFocalLength(std::max(0.1f, camera_->focalLength() - 0.1f));
+        if (rightBracketNow && !rightBracketPrev && !ctrl)
+            camera_->setFocalLength(std::min(5.0f, camera_->focalLength() + 0.1f));
         leftBracketPrev = leftBracketNow;
         rightBracketPrev = rightBracketNow;
     }
@@ -385,24 +371,16 @@ void Application::handleOrbit() {
     constexpr float PAD = 6.0f;
 
     if (mouse_.rightPressed) {
-        int nSliders = transform_.planeCount();
+        int nSliders = camera_->planeCount();
         float panelH = PAD * 2.0f + 24.0f + (float)nSliders * SLIDER_HEIGHT + 10.0f;
         bool overSlider = mouse_.x >= 10.0f && mouse_.x <= 10.0f + PANEL_WIDTH &&
                           mouse_.y >= 10.0f && mouse_.y <= 10.0f + panelH;
         if (!overSlider && !mouse_.left)
-            orbitMode_ = true;
+            camera_->beginOrbit(mouse_.x, mouse_.y);
     }
-    if (mouse_.rightReleased) orbitMode_ = false;
-    if (orbitMode_ && mouse_.right && mouse_.moved) {
-        double dx = mouse_.x - mouse_.lastX;
-        double dy = mouse_.y - mouse_.lastY;
-        if (dims_ >= 3) {
-            transform_.angles[1] -= (float)dx * 0.005f;
-            transform_.angles[dims_ - 1] += (float)dy * 0.005f;
-        } else if (transform_.planeCount() >= 1) {
-            transform_.angles[0] += (float)dx * 0.005f;
-        }
-    }
+    if (mouse_.rightReleased) camera_->endOrbit();
+    if (camera_->isOrbiting() && mouse_.right && mouse_.moved)
+        camera_->updateOrbit(mouse_.x, mouse_.y);
 }
 
 void Application::handleSliders() {
@@ -413,7 +391,7 @@ void Application::handleSliders() {
     constexpr float VALUE_WIDTH = 55.0f;
     constexpr float PAD = 6.0f;
 
-    int nSliders = transform_.planeCount();
+    int nSliders = camera_->planeCount();
     float panelTop = 10.0f;
     float panelLeft = 10.0f;
     float titleH = 24.0f;
@@ -431,7 +409,7 @@ void Application::handleSliders() {
             float tglY = rowY + (SLIDER_HEIGHT - TOGGLE_SIZE) / 2;
             if (mouse_.x >= toggleX && mouse_.x <= toggleX + TOGGLE_SIZE &&
                 mouse_.y >= tglY && mouse_.y <= tglY + TOGGLE_SIZE) {
-                transform_.autoRotate[i] = !transform_.autoRotate[i];
+                camera_->autoRotateFlags()[i] = !camera_->autoRotateFlags()[i];
                 sliderHit = true;
                 break;
             }
@@ -445,7 +423,7 @@ void Application::handleSliders() {
                     dragSlider_ = i;
                     float t = (float)((mouse_.x - trackX) / trackW);
                     t = std::max(0.0f, std::min(1.0f, t));
-                    transform_.angles[i] = -PI + t * (2.0f * PI);
+                    camera_->angles()[i] = -PI + t * (2.0f * PI);
                     break;
                 }
             }
@@ -455,37 +433,39 @@ void Application::handleSliders() {
     if (dragSlider_ >= 0 && mouse_.left) {
         float t = (float)((mouse_.x - trackX) / trackW);
         t = std::max(0.0f, std::min(1.0f, t));
-        transform_.angles[dragSlider_] = -PI + t * (2.0f * PI);
+        camera_->angles()[dragSlider_] = -PI + t * (2.0f * PI);
     }
 
     if (mouse_.leftReleased) {
         if (clickedButton_ >= 0) {
             switch (clickedButton_) {
                 case BTN_RESET:
-                    std::fill(transform_.angles.begin(), transform_.angles.end(), 0.0f);
-                    std::fill(transform_.translation.begin(), transform_.translation.end(), 0.0f);
+                    camera_->reset();
                     break;
                 case BTN_WIREFRAME: wireframeOnly_ = !wireframeOnly_; break;
                 case BTN_COLOR:
                     colorScheme_ = (colorScheme_ + 1) % 5;
-                    if (colorScheme_ == 0) model_.vertices = modelVertsBackup_;
-                    else assignFaceColors(model_, colorScheme_ - 1);
+                    if (colorScheme_ == 0) model_.restoreVertices();
+                    else model_.assignFaceColors(colorScheme_ - 1);
                     break;
                 case BTN_PRESET:
                     rotPreset_ = (rotPreset_ + 1) % 4;
-                    switch (rotPreset_) {
-                        case 0: std::fill(transform_.autoRotate.begin(), transform_.autoRotate.end(), false); break;
-                        case 1: std::fill(transform_.autoRotate.begin(), transform_.autoRotate.end(), true); break;
-                        case 2: for (int i = 0; i < transform_.planeCount(); i++) transform_.autoRotate[i] = (i % 2 == 0); break;
-                        case 3: for (int i = 0; i < transform_.planeCount(); i++) transform_.autoRotate[i] = (i % 3 == 0); break;
+                    {
+                        auto& ar = camera_->autoRotateFlags();
+                        switch (rotPreset_) {
+                            case 0: std::fill(ar.begin(), ar.end(), false); break;
+                            case 1: std::fill(ar.begin(), ar.end(), true); break;
+                            case 2: for (int i = 0; i < camera_->planeCount(); i++) ar[i] = (i % 2 == 0); break;
+                            case 3: for (int i = 0; i < camera_->planeCount(); i++) ar[i] = (i % 3 == 0); break;
+                        }
                     }
                     break;
-                case BTN_FOCAL_DOWN: focalLength_ = std::max(0.1f, focalLength_ - 0.1f); break;
-                case BTN_FOCAL_UP: focalLength_ = std::min(5.0f, focalLength_ + 0.1f); break;
-                case BTN_MODE: renderMode_ = (renderMode_ + 1) % 3; break;
+                case BTN_FOCAL_DOWN: camera_->setFocalLength(std::max(0.1f, camera_->focalLength() - 0.1f)); break;
+                case BTN_FOCAL_UP: camera_->setFocalLength(std::min(5.0f, camera_->focalLength() + 0.1f)); break;
+                case BTN_MODE: camera_->cycleRenderMode(); break;
                 case BTN_FS: toggleFullscreen(); break;
-                case BTN_SAVE: saveState("ducky_state.txt", transform_); break;
-                case BTN_LOAD: loadState("ducky_state.txt", transform_); break;
+                case BTN_SAVE: camera_->saveState("ducky_state.txt"); break;
+                case BTN_LOAD: camera_->loadState("ducky_state.txt"); break;
                 case BTN_SHOT: takeScreenshot(); break;
                 case BTN_LIGHTING: lighting_ = !lighting_; break;
             }
@@ -521,25 +501,6 @@ void Application::handleSliders() {
     }
 }
 
-void Application::processProjection() {
-    float* pos = (float*)alloca(dims_ * sizeof(float));
-    for (unsigned int i = 0; i < model_.vertexCount; i++) {
-        for (unsigned int d = 0; d < dims_; d++)
-            pos[d] = model_.vertices[i * fpv_ + d];
-        for (unsigned int d = 0; d < dims_; d++)
-            pos[d] += transform_.translation[d];
-        applyRotation(pos, transform_);
-        switch (renderMode_) {
-            case 0: projectPerspective(pos, &projectedVerts_[i * 6], dims_, focalLength_); break;
-            case 1: projectStereographic(pos, &projectedVerts_[i * 6], dims_, focalLength_); break;
-            default: projectOrthographic(pos, &projectedVerts_[i * 6], dims_); break;
-        }
-        projectedVerts_[i * 6 + 3] = model_.vertices[i * fpv_ + dims_];
-        projectedVerts_[i * 6 + 4] = model_.vertices[i * fpv_ + dims_ + 1];
-        projectedVerts_[i * 6 + 5] = model_.vertices[i * fpv_ + dims_ + 2];
-    }
-}
-
 void Application::drawUI() {
     constexpr float PANEL_WIDTH = 290.0f;
     constexpr float SLIDER_HEIGHT = 28.0f;
@@ -549,7 +510,7 @@ void Application::drawUI() {
     constexpr float PAD = 6.0f;
 
     auto& r = *renderer_;
-    int nSliders = transform_.planeCount();
+    int nSliders = camera_->planeCount();
     float panelTop = 10.0f;
     float panelLeft = 10.0f;
     float titleH = 24.0f;
@@ -569,7 +530,7 @@ void Application::drawUI() {
              0.3f, 0.3f, 0.5f, 0.8f, (float)fbW_, (float)fbH_);
 
     char titleStr[64];
-    snprintf(titleStr, sizeof(titleStr), "%uD Rotations", dims_);
+    snprintf(titleStr, sizeof(titleStr), "%uD Rotations", model_.dimensions());
 
     float toggleX = panelLeft + PAD;
     float labelX = toggleX + TOGGLE_SIZE + PAD;
@@ -581,7 +542,7 @@ void Application::drawUI() {
     for (int i = 0; i < nSliders; i++) {
         float rowY = panelTop + PAD + titleH + PAD + i * SLIDER_HEIGHT;
 
-        bool autoOn = transform_.autoRotate[i];
+        bool autoOn = camera_->autoRotateFlags()[i];
         drawRect(r.uiProgram(), r.uiVAO(), r.uiVBO(),
                  toggleX, rowY + (SLIDER_HEIGHT - TOGGLE_SIZE) / 2,
                  TOGGLE_SIZE, TOGGLE_SIZE,
@@ -595,8 +556,9 @@ void Application::drawUI() {
 
         int pi = 0;
         int ai = -1, aj = -1;
-        for (int a = 0; a < (int)dims_ && pi <= i; a++)
-            for (int b = a + 1; b < (int)dims_ && pi <= i; b++, pi++)
+        unsigned int d = model_.dimensions();
+        for (int a = 0; a < (int)d && pi <= i; a++)
+            for (int b = a + 1; b < (int)d && pi <= i; b++, pi++)
                 if (pi == i) { ai = a; aj = b; }
         snprintf(label, sizeof(label), "(%d,%d)", ai, aj);
 
@@ -604,7 +566,7 @@ void Application::drawUI() {
                  trackX, rowY, trackW, SLIDER_HEIGHT,
                  0.2f, 0.2f, 0.3f, 0.9f, (float)fbW_, (float)fbH_);
 
-        float val = transform_.angles[i];
+        float val = camera_->angles()[i];
         float fillFrac = (val + PI) / (2.0f * PI);
         fillFrac = std::max(0.0f, std::min(1.0f, fillFrac));
         drawRect(r.uiProgram(), r.uiVAO(), r.uiVBO(),
@@ -646,13 +608,13 @@ void Application::drawUI() {
                  "Wireframe: %s\n"
                  "Lighting: %s\n"
                  "Mode: %s",
-                 dims_, model_.vertexCount, model_.indexCount / 3,
-                 edges_.size(), transform_.planeCount(),
-                 focalLength_,
+                 model_.dimensions(), model_.vertexCount(), model_.indexCount() / 3,
+                 model_.edgeCount(), camera_->planeCount(),
+                 camera_->focalLength(),
                  colorSchemeNames_[colorScheme_],
                  wireframeOnly_ ? "ON" : "OFF",
                  lighting_ ? "ON" : "OFF",
-                 renderModeNames_[renderMode_]);
+                 renderModeNames_[(int)camera_->renderMode()]);
 
         std::string infoStr(infoLines);
         size_t pos = 0;
@@ -706,7 +668,7 @@ void Application::drawUI() {
         }
         char perfStr[128];
         snprintf(perfStr, sizeof(perfStr), "FPS: %.1f  Verts: %u  Tris: %u",
-                 perfFps_, model_.vertexCount, model_.indexCount / 3);
+                 perfFps_, model_.vertexCount(), model_.indexCount() / 3);
         drawTextAt(r.dtVAO(), r.dtVBO(), r.dtEBO(), r.textProgram(),
                    (float)fbW_ - 250.0f, (float)fbH_ - 30.0f, perfStr,
                    (float)fbW_, (float)fbH_, r.dtIndices(), r.textMaxQuads());
@@ -718,10 +680,10 @@ void Application::drawUI() {
         snprintf(hintText, sizeof(hintText),
                  "%uD  |  Rot:1-0,-=  |  E=wireframe V=preset C=color A=autorotate "
                  "T=transparency L=lighting []=focal M=render R=reset  |  "
-                 "F11=FS F12=shot F1=perf  |  Right panel has all controls", dims_);
+                 "F11=FS F12=shot F1=perf  |  Right panel has all controls", model_.dimensions());
 
         int hudNumQuads = stb_easy_font_print(PANEL_WIDTH + 20, 12, hintText,
-                                              nullptr, textBuffer_.data(), (int)textBuffer_.size());
+                                               nullptr, textBuffer_.data(), (int)textBuffer_.size());
         glUseProgram(r.textProgram());
         glUniform2f(r.textScreenSizeLoc(), (float)fbW_, (float)fbH_);
         glBindBuffer(GL_ARRAY_BUFFER, r.textVBO());

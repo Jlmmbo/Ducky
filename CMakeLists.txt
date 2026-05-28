@@ -9,6 +9,7 @@ include_directories(${CMAKE_SOURCE_DIR}/src)
 # ── Library ──
 add_library(ducky
     src/core.cpp
+    src/camera.cpp
     src/renderer.cpp
     src/io.cpp
     src/shader.cpp

@@ -73,7 +73,7 @@ void main() {
 )";
 
 Renderer::Renderer(const Model& model, const std::vector<Edge>& edges)
-    : dims_(model.dimensions) {
+    : dims_(model.dimensions()) {
     initShaders();
     initBuffers(model, edges);
     initAxesColors(dims_);
@@ -89,6 +89,7 @@ Renderer::Renderer(const Model& model, const std::vector<Edge>& edges)
         dtIndices_[i * 6 + 4] = base + 3;
         dtIndices_[i * 6 + 5] = base + 2;
     }
+    glBindVertexArray(dtVAO_);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, dtEBO_);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, dtIndices_.size() * sizeof(unsigned int), dtIndices_.data(), GL_STATIC_DRAW);
 }
@@ -154,9 +155,9 @@ void Renderer::initBuffers(const Model& model, const std::vector<Edge>& edges) {
 
     glBindVertexArray(tessVAO_);
     glBindBuffer(GL_ARRAY_BUFFER, tessVBO_);
-    glBufferData(GL_ARRAY_BUFFER, model.vertexCount * 6 * sizeof(float), nullptr, GL_DYNAMIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, model.vertexCount() * 6 * sizeof(float), nullptr, GL_DYNAMIC_DRAW);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, tessEBO_);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, model.indexCount * sizeof(unsigned int), model.indices.data(), GL_STATIC_DRAW);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, model.indexCount() * sizeof(unsigned int), model.indices().data(), GL_STATIC_DRAW);
 
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), nullptr);
     glEnableVertexAttribArray(0);
@@ -190,9 +191,9 @@ void Renderer::initBuffers(const Model& model, const std::vector<Edge>& edges) {
     glGenBuffers(1, &subEBO_);
     glBindVertexArray(subVAO_);
     glBindBuffer(GL_ARRAY_BUFFER, subVBO_);
-    glBufferData(GL_ARRAY_BUFFER, (model.indexCount / 3) * maxVertsPerTri * 6 * sizeof(float), nullptr, GL_DYNAMIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, (model.indexCount() / 3) * maxVertsPerTri * 6 * sizeof(float), nullptr, GL_DYNAMIC_DRAW);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, subEBO_);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, (model.indexCount / 3) * maxTrisPerTri * 3 * sizeof(unsigned int), nullptr, GL_DYNAMIC_DRAW);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, (model.indexCount() / 3) * maxTrisPerTri * 3 * sizeof(unsigned int), nullptr, GL_DYNAMIC_DRAW);
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), nullptr);
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)(3 * sizeof(float)));
@@ -253,6 +254,7 @@ void Renderer::initAxesColors(unsigned int dims) {
 }
 
 void Renderer::clear() {
+    glViewport(0, 0, fbW_, fbH_);
     glClearColor(0.05f, 0.05f, 0.1f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 }
@@ -291,23 +293,23 @@ void Renderer::renderFaces(const Model& model, const TransformND& transform,
             int ic = indices[t * 3 + 2];
 
             for (unsigned int d = 0; d < dims_; d++) {
-                tposA[d] = model.vertices[ia * fpv + d] + transform.translation[d];
-                tposB[d] = model.vertices[ib * fpv + d] + transform.translation[d];
-                tposC[d] = model.vertices[ic * fpv + d] + transform.translation[d];
+                tposA[d] = model.vertexData()[ia * fpv + d] + transform.translation[d];
+                tposB[d] = model.vertexData()[ib * fpv + d] + transform.translation[d];
+                tposC[d] = model.vertexData()[ic * fpv + d] + transform.translation[d];
             }
             applyRotation(tposA, transform);
             applyRotation(tposB, transform);
             applyRotation(tposC, transform);
 
-            float rA = model.vertices[ia * fpv + dims_];
-            float gA = model.vertices[ia * fpv + dims_ + 1];
-            float bA = model.vertices[ia * fpv + dims_ + 2];
-            float rB = model.vertices[ib * fpv + dims_];
-            float gB = model.vertices[ib * fpv + dims_ + 1];
-            float bB = model.vertices[ib * fpv + dims_ + 2];
-            float rC = model.vertices[ic * fpv + dims_];
-            float gC = model.vertices[ic * fpv + dims_ + 1];
-            float bC = model.vertices[ic * fpv + dims_ + 2];
+            float rA = model.vertexData()[ia * fpv + dims_];
+            float gA = model.vertexData()[ia * fpv + dims_ + 1];
+            float bA = model.vertexData()[ia * fpv + dims_ + 2];
+            float rB = model.vertexData()[ib * fpv + dims_];
+            float gB = model.vertexData()[ib * fpv + dims_ + 1];
+            float bB = model.vertexData()[ib * fpv + dims_ + 2];
+            float rC = model.vertexData()[ic * fpv + dims_];
+            float gC = model.vertexData()[ic * fpv + dims_ + 1];
+            float bC = model.vertexData()[ic * fpv + dims_ + 2];
 
             unsigned int triVertBase = t * vertsPerTri;
             unsigned int triTriBase = t * trisPerTri;
@@ -491,8 +493,8 @@ void Renderer::renderEdges(const Model& model, const TransformND& transform,
         for (size_t i = 0; i < edges.size(); i++) {
             int ia = edges[i].a, ib = edges[i].b;
             for (unsigned int d = 0; d < dims_; d++) {
-                posA[d] = model.vertices[ia * fpv + d] + transform.translation[d];
-                posB[d] = model.vertices[ib * fpv + d] + transform.translation[d];
+                posA[d] = model.vertexData()[ia * fpv + d] + transform.translation[d];
+                posB[d] = model.vertexData()[ib * fpv + d] + transform.translation[d];
             }
             applyRotation(posA, transform);
             applyRotation(posB, transform);

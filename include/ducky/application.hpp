@@ -4,6 +4,7 @@
 #include <GLFW/glfw3.h>
 #include <vector>
 #include "ducky/core.hpp"
+#include "ducky/camera.hpp"
 #include "ducky/renderer.hpp"
 
 namespace dky {
@@ -19,17 +20,12 @@ private:
     void handleKeyboardShortcuts();
     void handleOrbit();
     void handleSliders();
-    void processProjection();
     void drawUI();
     void takeScreenshot();
     void toggleFullscreen();
 
     Model model_;
-    std::vector<Edge> edges_;
-    std::vector<float> modelVertsBackup_;
-    unsigned int dims_;
-    int fpv_;
-    TransformND transform_;
+    Camera* camera_ = nullptr;
     Renderer* renderer_ = nullptr;
 
     GLFWwindow* window_ = nullptr;
@@ -38,11 +34,8 @@ private:
     int colorScheme_ = 0;
     const char* colorSchemeNames_[5] = {"Model", "Golden", "Rainbow", "Mono", "Warm"};
     int rotPreset_ = 1;
-    float focalLength_ = 1.0f;
-    int renderMode_ = 0;
     const char* renderModeNames_[3] = {"Perspective", "Stereographic", "Orthographic"};
     bool isFullscreen_ = false;
-    bool orbitMode_ = false;
     bool transparent_ = false;
     bool lighting_ = true;
     float modelAlpha_ = 0.35f;
@@ -61,10 +54,6 @@ private:
         BTN_FS, BTN_SAVE, BTN_LOAD, BTN_SHOT, BTN_LIGHTING,
         BTN_COUNT
     };
-
-    std::vector<float> projectedVerts_;
-    std::vector<float> axis3D_;
-    std::vector<float> edge3D_;
 
     double perfLastTime_ = 0;
     int perfFrameCount_ = 0;

@@ -9,15 +9,44 @@
 
 namespace dky {
 
-struct Model {
-    std::vector<float> vertices;
-    std::vector<unsigned int> indices;
-    unsigned int vertexCount = 0;
-    unsigned int indexCount = 0;
-    unsigned int dimensions = 4;
-};
+struct Edge { int a, b; };
 
-Model LoadModel(const char* path);
+class Model {
+public:
+    Model() = default;
+    explicit Model(const char* path);
+
+    void load(const char* path);
+    void backupVertices();
+    void restoreVertices();
+    void assignFaceColors(int colorScheme);
+    void generateEdges();
+
+    const float* vertexData() const { return vertices_.data(); }
+    float* vertexData() { return vertices_.data(); }
+    const unsigned int* indexData() const { return indices_.data(); }
+    unsigned int vertexCount() const { return vertexCount_; }
+    unsigned int indexCount() const { return indexCount_; }
+    unsigned int dimensions() const { return dimensions_; }
+    int fpv() const { return (int)dimensions_ + 3; }
+
+    const Edge* edgeData() const { return edges_.data(); }
+    size_t edgeCount() const { return edges_.size(); }
+
+    std::vector<float>& vertices() { return vertices_; }
+    const std::vector<float>& vertices() const { return vertices_; }
+    const std::vector<unsigned int>& indices() const { return indices_; }
+    const std::vector<Edge>& edges() const { return edges_; }
+
+private:
+    std::vector<float> vertices_;
+    std::vector<unsigned int> indices_;
+    std::vector<Edge> edges_;
+    std::vector<float> verticesBackup_;
+    unsigned int vertexCount_ = 0;
+    unsigned int indexCount_ = 0;
+    unsigned int dimensions_ = 4;
+};
 
 struct TransformND {
     std::vector<float> angles;
@@ -41,8 +70,6 @@ struct MouseState {
     bool moved = false;
 };
 
-struct Edge { int a, b; };
-
 constexpr float PI = 3.141592653589793f;
 
 void hslToRgb(float h, float s, float l, float& r, float& g, float& b);
@@ -56,6 +83,7 @@ std::vector<Edge> generateEdges(const float* vertices, unsigned int vertexCount,
                                 unsigned int dims, int fpv,
                                 const unsigned int* indices, unsigned int indexCount);
 
-void assignFaceColors(Model& model, int colorScheme);
+void assignFaceColors(float* vertices, const unsigned int* indices,
+                      unsigned int indexCount, unsigned int dims, int colorScheme);
 
 } // namespace dky
