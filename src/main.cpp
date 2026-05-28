@@ -983,10 +983,12 @@ int main(int argc, char* argv[]) {
             if (orbitMode && mouse.right && mouse.moved) {
                 double dx = mouse.x - mouse.lastX;
                 double dy = mouse.y - mouse.lastY;
-                if (transform.planeCount() >= 1)
+                if (dims >= 3) {
+                    transform.angles[1] -= (float)dx * 0.005f;          // XZ (yaw)
+                    transform.angles[dims - 1] += (float)dy * 0.005f;   // YZ (pitch)
+                } else if (transform.planeCount() >= 1) {
                     transform.angles[0] += (float)dx * 0.005f;
-                if (transform.planeCount() >= 2)
-                    transform.angles[1] += (float)dy * 0.005f;
+                }
             }
         }
 
