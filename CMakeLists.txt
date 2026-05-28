@@ -4,8 +4,24 @@ project(Ducky VERSION 1.0 LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-include_directories(${CMAKE_SOURCE_DIR}/include ${CMAKE_SOURCE_DIR}/src)
+include_directories(${CMAKE_SOURCE_DIR}/src)
 
+# ── Library ──
+add_library(ducky
+    src/core.cpp
+    src/renderer.cpp
+    src/io.cpp
+    src/shader.cpp
+    src/application.cpp
+    src/glad.c
+)
+
+target_include_directories(ducky
+    PUBLIC  $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>
+    PRIVATE ${CMAKE_SOURCE_DIR}/src
+)
+
+# ── Dependencies ──
 if(CMAKE_CROSSCOMPILING OR CMAKE_SYSTEM_NAME MATCHES "Windows")
     include(FetchContent)
     FetchContent_Declare(
@@ -16,9 +32,8 @@ if(CMAKE_CROSSCOMPILING OR CMAKE_SYSTEM_NAME MATCHES "Windows")
     if(NOT glfw_POPULATED)
         message(FATAL_ERROR "Failed to fetch GLFW. Please install glfw3 manually or check your internet connection.")
     endif()
-    add_executable(ducky WIN32 src/main.cpp src/glad.c)
     target_include_directories(ducky PRIVATE ${glfw_SOURCE_DIR}/include)
-    target_link_libraries(ducky glfw opengl32 gdi32 user32 shell32)
+    target_link_libraries(ducky PUBLIC glfw opengl32 gdi32 user32 shell32)
     if(EXISTS ${CMAKE_SOURCE_DIR}/bin/glfw3.dll)
         file(COPY ${CMAKE_SOURCE_DIR}/bin/glfw3.dll DESTINATION ${CMAKE_BINARY_DIR})
         file(COPY ${CMAKE_SOURCE_DIR}/bin/libgcc_s_seh-1.dll DESTINATION ${CMAKE_BINARY_DIR})
@@ -29,20 +44,20 @@ else()
     find_package(OpenGL REQUIRED)
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(GLFW REQUIRED glfw3)
-    add_executable(ducky src/main.cpp src/glad.c)
-    target_sources(ducky PRIVATE
-        src/main.hpp
-        src/transform.hpp
-        src/shader.hpp
-        src/render.hpp
-        src/io.hpp
-    )
     target_include_directories(ducky PRIVATE ${GLFW_INCLUDE_DIRS})
-    target_link_libraries(ducky ${OPENGL_LIBRARIES} ${GLFW_LIBRARIES})
+    target_link_libraries(ducky PUBLIC ${OPENGL_LIBRARIES} ${GLFW_LIBRARIES})
 endif()
 
+# ── Executable ──
+add_executable(ducky_app src/main.cpp)
+target_link_libraries(ducky_app ducky)
+
+# ── Copy assets to build directory ──
 if(EXISTS ${CMAKE_SOURCE_DIR}/model.dky)
     file(COPY ${CMAKE_SOURCE_DIR}/model.dky DESTINATION ${CMAKE_BINARY_DIR})
+endif()
+if(EXISTS ${CMAKE_SOURCE_DIR}/model_3d.dky)
+    file(COPY ${CMAKE_SOURCE_DIR}/model_3d.dky DESTINATION ${CMAKE_BINARY_DIR})
 endif()
 if(EXISTS ${CMAKE_SOURCE_DIR}/model_5d.dky)
     file(COPY ${CMAKE_SOURCE_DIR}/model_5d.dky DESTINATION ${CMAKE_BINARY_DIR})

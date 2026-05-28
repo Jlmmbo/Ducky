@@ -1,12 +1,12 @@
-#pragma once
-
+#include "ducky/io.hpp"
 #include <cstdio>
 #include <iostream>
 #include <vector>
 #include <ctime>
-#include "transform.hpp"
 
-inline void writeTGA(const char* path, int w, int h, unsigned char* data) {
+namespace dky {
+
+void writeTGA(const char* path, int w, int h, unsigned char* data) {
     FILE* f = fopen(path, "wb");
     if (!f) return;
     unsigned char header[18] = {0};
@@ -22,7 +22,7 @@ inline void writeTGA(const char* path, int w, int h, unsigned char* data) {
     fclose(f);
 }
 
-inline void saveState(const char* path, const TransformND& t) {
+void saveState(const char* path, const TransformND& t) {
     FILE* f = fopen(path, "w");
     if (!f) { std::cerr << "Failed to save state\n"; return; }
     fprintf(f, "%u\n", t.dims);
@@ -31,10 +31,9 @@ inline void saveState(const char* path, const TransformND& t) {
     for (float tr : t.translation) fprintf(f, "%.8f ", tr);
     fprintf(f, "\n");
     fclose(f);
-    std::cout << "Saved state to " << path << std::endl;
 }
 
-inline bool loadState(const char* path, TransformND& t) {
+bool loadState(const char* path, TransformND& t) {
     FILE* f = fopen(path, "r");
     if (!f) { std::cerr << "Failed to load state\n"; return false; }
     unsigned int dims;
@@ -61,6 +60,7 @@ inline bool loadState(const char* path, TransformND& t) {
     }
     t.angles = newAngles;
     t.translation = newTranslations;
-    std::cout << "Loaded state from " << path << std::endl;
     return true;
 }
+
+} // namespace dky

@@ -47,10 +47,9 @@ Ducky visualizes N-dimensional objects (3D, 4D, 5D, ...) by recursively projecti
 
 ```bash
 sudo apt install libglfw3-dev  # Debian/Ubuntu
-mkdir build && cd build
-cmake ..
-make
-./ducky [model.dky]
+cmake -B build
+make -C build -j$(nproc)
+./build/ducky_app [model.dky]
 ```
 
 ### Windows (Native)
@@ -62,7 +61,7 @@ Requires CMake and a C++17 compiler. GLFW is fetched automatically.
 ```powershell
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --config Release
-build\Release\ducky.exe model.dky
+build\Release\ducky_app.exe model.dky
 ```
 
 #### MinGW (on Windows)
@@ -70,7 +69,7 @@ build\Release\ducky.exe model.dky
 ```powershell
 cmake -B build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
 cmake --build build
-build\ducky.exe model.dky
+build\ducky_app.exe model.dky
 ```
 
 ## Controls
@@ -159,37 +158,96 @@ face
 ```
 Ducky/
 ├── cmake/
-│   └── mingw-toolchain.cmake   # MinGW cross-compilation toolchain
-├── src/                        # Source files
-│   ├── main.cpp                # Application entry point & main loop
-│   ├── main.hpp                # Model struct & loader (LoadModel)
-│   ├── transform.hpp           # N-D transform, rotation, & projection math
-│   ├── shader.hpp              # Shader compilation & loading helpers
-│   ├── render.hpp              # Edge generation, face colors, draw utilities
-│   ├── io.hpp                  # Screenshot & state save/load
-│   ├── glad.c                  # OpenGL loader
-│   ├── stb_image.h             # Texture loading
-│   └── stb_easy_font.h         # Bitmap font rendering
-├── shaders/                    # GLSL shaders
-│   ├── tesseract.vert/.frag    # 3D→2D projection vertex shader
-│   ├── axes.vert/.frag         # Coordinate axes
-│   ├── edge.vert/.frag         # Wireframe edges
-│   └── text.vert/.frag         # On-screen text
-├── include/                    # Headers (GLFW, GLAD, KHR)
-├── bin/                        # Compiled binaries
-├── model.dky                   # Default 4D model (tesseract, 96 verts)
-├── model_5d.dky                # 5D hypercube (penteract, 320 verts)
-├── BUGS.md                     # Known bugs and optimization notes
-├── CMakeLists.txt              # Build configuration
-└── README.md                   # This file
+│   └── mingw-toolchain.cmake     # MinGW cross-compilation toolchain
+├── include/ducky/                # Public library API headers
+│   ├── core.hpp                  # Model, TransformND, math, edge gen, face colors
+│   ├── renderer.hpp              # Renderer class (OpenGL rendering) + draw helpers
+│   ├── io.hpp                    # writeTGA, saveState, loadState
+│   └── application.hpp           # Application class (full app lifecycle)
+├── src/                          # Implementation files (library + entry point)
+│   ├── main.cpp                  # Thin entry point: creates & runs Application
+│   ├── core.cpp                  # LoadModel, rotation/projection math, edges, colors
+│   ├── renderer.cpp              # Renderer: GL buffer setup, face/axis/edge rendering
+│   ├── io.cpp                    # TGA screenshot, state persistence
+│   ├── application.cpp           # Application: window, input, UI, main loop
+│   ├── shader.hpp                # (internal) Shader compilation helpers
+│   ├── shader.cpp                # Shader loading & compilation
+│   ├── glad.c                    # OpenGL loader
+│   └── stb_easy_font.h           # Bitmap font rendering
+├── shaders/                      # GLSL shaders
+│   ├── tesseract.vert/.frag      # 3D→2D projection vertex/fragment shader
+│   ├── axes.vert/.frag           # Coordinate axes
+│   ├── edge.vert/.frag           # Wireframe edges
+│   └── text.vert/.frag           # On-screen text
+├── include/                      # Third-party headers (GLFW, GLAD, KHR)
+├── bin/                          # Cross-compilation DLLs
+├── model.dky                     # Default 4D model (tesseract, 96 verts)
+├── model_3d.dky                  # 3D model
+├── model_5d.dky                  # 5D hypercube (penteract, 320 verts)
+├── CMakeLists.txt                # Build configuration (library + executable)
+└── README.md                     # This file
 ```
+
+## Usage as a Library
+
+Ducky builds as a static library (`ducky`) with a separate executable target (`ducky_app`). Link against it in your own CMake project:
+
+```cmake
+add_subdirectory(ducky)
+target_link_libraries(my_app ducky)
+target_include_directories(my_app PRIVATE ducky/include)
+```
+
+### Quick start
+
+```cpp
+#include <ducky/application.hpp>
+
+int main(int argc, char* argv[]) {
+    dky::Application app(argc, argv);
+    return app.run();
+}
+```
+
+### Using individual components
+
+```cpp
+#include <ducky/core.hpp>
+#include <ducky/renderer.hpp>
+#include <ducky/io.hpp>
+
+// Load an N-D model
+dky::Model model = dky::LoadModel("model.dky");
+
+// Generate wireframe edges
+auto edges = dky::generateEdges(
+    model.vertices.data(), model.vertexCount,
+    model.dimensions, model.dimensions + 3,
+    model.indices.data(), model.indexCount);
+
+// Create renderer (requires active OpenGL context)
+dky::Renderer renderer(model, edges);
+
+// Transform & project
+dky::TransformND t;
+t.dims = model.dimensions;
+t.angles.resize(t.planeCount(), 0.0f);
+// ... set angles, rotate, project with applyRotation(), projectPerspective(), etc.
+
+// Save/load camera state
+dky::saveState("state.txt", t);
+dky::loadState("state.txt", t);
+```
+
+### Namespace
+
+All public API lives under the `dky::` namespace.
 
 ## Dependencies
 
 - **GLFW 3.4** — Window management & input (fetched via FetchContent for Windows)
-- **GLAD** — OpenGL function loader (included in src/)
-- **stb_image** — Texture loading (included in src/)
-- **stb_easy_font** — Bitmap font rendering (included in src/)
+- **GLAD** — OpenGL function loader (included in `src/glad.c`)
+- **stb_easy_font** — Bitmap font rendering (included in `src/`)
 
 ## License
 
