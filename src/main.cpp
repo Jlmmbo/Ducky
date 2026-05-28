@@ -37,6 +37,7 @@ constexpr float VALUE_WIDTH = 55.0f;
 constexpr float PAD = 6.0f;
 
 constexpr float PI = 3.141592653589793f;
+constexpr int EDGE_SUBDIV = 32;
 
 static const char* UI_VERT_SRC = R"(
 #version 330 core
@@ -639,9 +640,26 @@ int main(int argc, char* argv[]) {
 
     glBindVertexArray(edgeVAO);
     glBindBuffer(GL_ARRAY_BUFFER, edgeVBO);
-    glBufferData(GL_ARRAY_BUFFER, edges.size() * 2 * 3 * sizeof(float), nullptr, GL_DYNAMIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, edges.size() * (EDGE_SUBDIV + 1) * 3 * sizeof(float), nullptr, GL_DYNAMIC_DRAW);
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), nullptr);
     glEnableVertexAttribArray(0);
+
+    // === Subdivided face buffers (for stereographic mode) ===
+    int maxVertsPerTri = (EDGE_SUBDIV + 1) * (EDGE_SUBDIV + 2) / 2;
+    int maxTrisPerTri = EDGE_SUBDIV * EDGE_SUBDIV;
+    GLuint subVAO, subVBO, subEBO;
+    glGenVertexArrays(1, &subVAO);
+    glGenBuffers(1, &subVBO);
+    glGenBuffers(1, &subEBO);
+    glBindVertexArray(subVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, subVBO);
+    glBufferData(GL_ARRAY_BUFFER, (model.indexCount / 3) * maxVertsPerTri * 6 * sizeof(float), nullptr, GL_DYNAMIC_DRAW);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, subEBO);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, (model.indexCount / 3) * maxTrisPerTri * 3 * sizeof(unsigned int), nullptr, GL_DYNAMIC_DRAW);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), nullptr);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)(3 * sizeof(float)));
+    glEnableVertexAttribArray(1);
 
     GLuint edgeProgram = createShaderProgram("shaders/edge.vert", "shaders/edge.frag");
     if (!edgeProgram) { glfwTerminate(); return -1; }
@@ -743,12 +761,15 @@ int main(int argc, char* argv[]) {
 
     // Reusable buffers
     std::vector<float> axis3D(dims * 2 * 6);
-    std::vector<float> edge3D(edges.size() * 2 * 3);
+    std::vector<float> edge3D(edges.size() * (EDGE_SUBDIV + 1) * 3);
     struct TriDepth { int idx; float depth; };
     std::vector<TriDepth> triDepths;
     triDepths.reserve(model.indexCount / 3 + 1);
     std::vector<unsigned int> sorted;
     sorted.reserve(model.indexCount + 3);
+    std::vector<float> subVerts;
+    std::vector<unsigned int> subIdx;
+    std::vector<TriDepth> subDepths;
 
     // Performance tracking
     double perfLastTime = glfwGetTime();
@@ -1140,55 +1161,194 @@ int main(int argc, char* argv[]) {
             projectedVerts[i * 6 + 5] = model.vertices[i * fpv + dims + 2];
         }
 
-        // Depth sort
+        // Depth sort and face rendering
         {
             unsigned int numTri = model.indexCount / 3;
-            triDepths.resize(numTri);
-            for (unsigned int i = 0; i < numTri; i++) {
-                float sum = 0;
-                for (int j = 0; j < 3; j++) {
-                    int vi = model.indices[i * 3 + j];
-                    sum += projectedVerts[vi * 6 + 2];
+
+            if (renderMode == 1) {
+                // Subdivide triangles for stereographic mode
+                int n = EDGE_SUBDIV;
+                int vertsPerTri = (n + 1) * (n + 2) / 2;
+                int trisPerTri = n * n;
+                unsigned int totalSubTris = numTri * trisPerTri;
+                unsigned int totalSubVerts = numTri * vertsPerTri;
+
+                subVerts.resize(totalSubVerts * 6);
+                subIdx.resize(totalSubTris * 3);
+                subDepths.resize(totalSubTris);
+
+                float* tposA = (float*)alloca(dims * sizeof(float));
+                float* tposB = (float*)alloca(dims * sizeof(float));
+                float* tposC = (float*)alloca(dims * sizeof(float));
+                float* interp = (float*)alloca(dims * sizeof(float));
+
+                for (unsigned int t = 0; t < numTri; t++) {
+                    int ia = model.indices[t * 3];
+                    int ib = model.indices[t * 3 + 1];
+                    int ic = model.indices[t * 3 + 2];
+
+                    for (unsigned int d = 0; d < dims; d++) {
+                        tposA[d] = model.vertices[ia * fpv + d] + transform.translation[d];
+                        tposB[d] = model.vertices[ib * fpv + d] + transform.translation[d];
+                        tposC[d] = model.vertices[ic * fpv + d] + transform.translation[d];
+                    }
+                    applyRotation(tposA, transform);
+                    applyRotation(tposB, transform);
+                    applyRotation(tposC, transform);
+
+                    float rA = model.vertices[ia * fpv + dims];
+                    float gA = model.vertices[ia * fpv + dims + 1];
+                    float bA = model.vertices[ia * fpv + dims + 2];
+                    float rB = model.vertices[ib * fpv + dims];
+                    float gB = model.vertices[ib * fpv + dims + 1];
+                    float bB = model.vertices[ib * fpv + dims + 2];
+                    float rC = model.vertices[ic * fpv + dims];
+                    float gC = model.vertices[ic * fpv + dims + 1];
+                    float bC = model.vertices[ic * fpv + dims + 2];
+
+                    unsigned int triVertBase = t * vertsPerTri;
+                    unsigned int triTriBase = t * trisPerTri;
+
+                    // Generate grid vertices
+                    for (int j = 0; j <= n; j++) {
+                        int rowOff = j * (n + 1) - j * (j - 1) / 2;
+                        for (int i = 0; i <= n - j; i++) {
+                            float u = (float)i / n;
+                            float v = (float)j / n;
+                            float w = 1.0f - u - v;
+                            int vidx = triVertBase + rowOff + i;
+
+                            for (unsigned int d = 0; d < dims; d++)
+                                interp[d] = tposA[d] * w + tposB[d] * u + tposC[d] * v;
+                            projectStereographic(interp, &subVerts[vidx * 6], dims, focalLength);
+
+                            subVerts[vidx * 6 + 3] = rA * w + rB * u + rC * v;
+                            subVerts[vidx * 6 + 4] = gA * w + gB * u + gC * v;
+                            subVerts[vidx * 6 + 5] = bA * w + bB * u + bC * v;
+                        }
+                    }
+
+                    // Generate sub-triangle indices and compute depths
+                    unsigned int subTriCount = 0;
+                    for (int j = 0; j < n; j++) {
+                        int rowOffJ = j * (n + 1) - j * (j - 1) / 2;
+                        int rowOffJ1 = (j + 1) * (n + 1) - (j + 1) * j / 2;
+                        for (int i = 0; i < n - j; i++) {
+                            unsigned int v00 = triVertBase + rowOffJ + i;
+                            unsigned int v10 = triVertBase + rowOffJ + i + 1;
+                            unsigned int v01 = triVertBase + rowOffJ1 + i;
+
+                            unsigned int ti = triTriBase + subTriCount;
+
+                            // Lower triangle
+                            subIdx[ti * 3 + 0] = v00;
+                            subIdx[ti * 3 + 1] = v10;
+                            subIdx[ti * 3 + 2] = v01;
+                            subDepths[ti].idx = (int)ti;
+                            subDepths[ti].depth = (subVerts[v00 * 6 + 2] + subVerts[v10 * 6 + 2] + subVerts[v01 * 6 + 2]) / 3.0f;
+                            subTriCount++;
+
+                            // Upper triangle (if not on diagonal)
+                            if (i + j < n - 1) {
+                                unsigned int v11 = triVertBase + rowOffJ1 + i + 1;
+                                unsigned int ti2 = triTriBase + subTriCount;
+                                subIdx[ti2 * 3 + 0] = v10;
+                                subIdx[ti2 * 3 + 1] = v11;
+                                subIdx[ti2 * 3 + 2] = v01;
+                                subDepths[ti2].idx = (int)ti2;
+                                subDepths[ti2].depth = (subVerts[v10 * 6 + 2] + subVerts[v11 * 6 + 2] + subVerts[v01 * 6 + 2]) / 3.0f;
+                                subTriCount++;
+                            }
+                        }
+                    }
                 }
-                triDepths[i] = {(int)i, sum / 3.0f};
-            }
-            std::sort(triDepths.begin(), triDepths.end(),
-                      [](auto& a, auto& b) { return a.depth > b.depth; });
 
-            sorted.resize(model.indexCount);
-            for (unsigned int i = 0; i < numTri; i++) {
-                int t = triDepths[i].idx;
-                sorted[i * 3 + 0] = model.indices[t * 3 + 0];
-                sorted[i * 3 + 1] = model.indices[t * 3 + 1];
-                sorted[i * 3 + 2] = model.indices[t * 3 + 2];
-            }
-            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, tessEBO);
-            glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, 0, model.indexCount * sizeof(unsigned int), sorted.data());
-        }
+                // Sort sub-triangles by depth
+                std::sort(subDepths.begin(), subDepths.end(),
+                          [](auto& a, auto& b) { return a.depth > b.depth; });
 
-        // Upload projected vertices
-        glBindBuffer(GL_ARRAY_BUFFER, tessVBO);
-        glBufferSubData(GL_ARRAY_BUFFER, 0, model.vertexCount * 6 * sizeof(float), projectedVerts.data());
+                // Reorder indices
+                std::vector<unsigned int> sortedSubIdx(totalSubTris * 3);
+                for (unsigned int i = 0; i < totalSubTris; i++) {
+                    int t = subDepths[i].idx;
+                    sortedSubIdx[i * 3 + 0] = subIdx[t * 3 + 0];
+                    sortedSubIdx[i * 3 + 1] = subIdx[t * 3 + 1];
+                    sortedSubIdx[i * 3 + 2] = subIdx[t * 3 + 2];
+                }
 
-        glClearColor(0.05f, 0.05f, 0.1f, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+                // Upload subdivided geometry
+                glBindBuffer(GL_ARRAY_BUFFER, subVBO);
+                glBufferSubData(GL_ARRAY_BUFFER, 0, totalSubVerts * 6 * sizeof(float), subVerts.data());
+                glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, subEBO);
+                glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, 0, totalSubTris * 3 * sizeof(unsigned int), sortedSubIdx.data());
 
-        // Draw faces (skip in wireframe-only mode)
-        if (!wireframeOnly) {
-            if (transparent) {
-                glEnable(GL_BLEND);
-                glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-                glDepthMask(GL_FALSE);
-            }
-            glUseProgram(tessProgram);
-            glUniform1f(tessUAspect, aspect);
-            glUniform1f(tessUDist3D, 3.0f * focalLength);
-            glUniform1f(tessUAlpha, transparent ? modelAlpha : 1.0f);
-            glBindVertexArray(tessVAO);
-            glDrawElements(GL_TRIANGLES, model.indexCount, GL_UNSIGNED_INT, nullptr);
-            if (transparent) {
-                glDepthMask(GL_TRUE);
-                glDisable(GL_BLEND);
+                glClearColor(0.05f, 0.05f, 0.1f, 1.0f);
+                glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+                if (!wireframeOnly) {
+                    if (transparent) {
+                        glEnable(GL_BLEND);
+                        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+                        glDepthMask(GL_FALSE);
+                    }
+                    glUseProgram(tessProgram);
+                    glUniform1f(tessUAspect, aspect);
+                    glUniform1f(tessUDist3D, 3.0f * focalLength);
+                    glUniform1f(tessUAlpha, transparent ? modelAlpha : 1.0f);
+                    glBindVertexArray(subVAO);
+                    glDrawElements(GL_TRIANGLES, totalSubTris * 3, GL_UNSIGNED_INT, nullptr);
+                    if (transparent) {
+                        glDepthMask(GL_TRUE);
+                        glDisable(GL_BLEND);
+                    }
+                }
+            } else {
+                // Original path for perspective/orthographic
+                triDepths.resize(numTri);
+                for (unsigned int i = 0; i < numTri; i++) {
+                    float sum = 0;
+                    for (int j = 0; j < 3; j++) {
+                        int vi = model.indices[i * 3 + j];
+                        sum += projectedVerts[vi * 6 + 2];
+                    }
+                    triDepths[i] = {(int)i, sum / 3.0f};
+                }
+                std::sort(triDepths.begin(), triDepths.end(),
+                          [](auto& a, auto& b) { return a.depth > b.depth; });
+
+                sorted.resize(model.indexCount);
+                for (unsigned int i = 0; i < numTri; i++) {
+                    int t = triDepths[i].idx;
+                    sorted[i * 3 + 0] = model.indices[t * 3 + 0];
+                    sorted[i * 3 + 1] = model.indices[t * 3 + 1];
+                    sorted[i * 3 + 2] = model.indices[t * 3 + 2];
+                }
+                glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, tessEBO);
+                glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, 0, model.indexCount * sizeof(unsigned int), sorted.data());
+
+                glBindBuffer(GL_ARRAY_BUFFER, tessVBO);
+                glBufferSubData(GL_ARRAY_BUFFER, 0, model.vertexCount * 6 * sizeof(float), projectedVerts.data());
+
+                glClearColor(0.05f, 0.05f, 0.1f, 1.0f);
+                glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+                if (!wireframeOnly) {
+                    if (transparent) {
+                        glEnable(GL_BLEND);
+                        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+                        glDepthMask(GL_FALSE);
+                    }
+                    glUseProgram(tessProgram);
+                    glUniform1f(tessUAspect, aspect);
+                    glUniform1f(tessUDist3D, 3.0f * focalLength);
+                    glUniform1f(tessUAlpha, transparent ? modelAlpha : 1.0f);
+                    glBindVertexArray(tessVAO);
+                    glDrawElements(GL_TRIANGLES, model.indexCount, GL_UNSIGNED_INT, nullptr);
+                    if (transparent) {
+                        glDepthMask(GL_TRUE);
+                        glDisable(GL_BLEND);
+                    }
+                }
             }
         }
 
@@ -1218,24 +1378,57 @@ int main(int argc, char* argv[]) {
 
         // Draw wireframe edges
         {
-            for (size_t i = 0; i < edges.size(); i++) {
-                int ia = edges[i].a, ib = edges[i].b;
-                edge3D[i * 6 + 0] = projectedVerts[ia * 6];
-                edge3D[i * 6 + 1] = projectedVerts[ia * 6 + 1];
-                edge3D[i * 6 + 2] = projectedVerts[ia * 6 + 2];
-                edge3D[i * 6 + 3] = projectedVerts[ib * 6];
-                edge3D[i * 6 + 4] = projectedVerts[ib * 6 + 1];
-                edge3D[i * 6 + 5] = projectedVerts[ib * 6 + 2];
+            size_t vertCount = 0;
+            if (renderMode == 1) {
+                float* posA = (float*)alloca(dims * sizeof(float));
+                float* posB = (float*)alloca(dims * sizeof(float));
+                float* interp = (float*)alloca(dims * sizeof(float));
+                for (size_t i = 0; i < edges.size(); i++) {
+                    int ia = edges[i].a, ib = edges[i].b;
+                    for (unsigned int d = 0; d < dims; d++) {
+                        posA[d] = model.vertices[ia * fpv + d] + transform.translation[d];
+                        posB[d] = model.vertices[ib * fpv + d] + transform.translation[d];
+                    }
+                    applyRotation(posA, transform);
+                    applyRotation(posB, transform);
+                    for (int s = 0; s <= EDGE_SUBDIV; s++) {
+                        float t = (float)s / (float)EDGE_SUBDIV;
+                        for (unsigned int d = 0; d < dims; d++)
+                            interp[d] = posA[d] * (1.0f - t) + posB[d] * t;
+                        projectStereographic(interp, &edge3D[vertCount * 3], dims, focalLength);
+                        vertCount++;
+                    }
+                }
+            } else {
+                for (size_t i = 0; i < edges.size(); i++) {
+                    int ia = edges[i].a, ib = edges[i].b;
+                    edge3D[vertCount * 3 + 0] = projectedVerts[ia * 6];
+                    edge3D[vertCount * 3 + 1] = projectedVerts[ia * 6 + 1];
+                    edge3D[vertCount * 3 + 2] = projectedVerts[ia * 6 + 2];
+                    vertCount++;
+                    edge3D[vertCount * 3 + 0] = projectedVerts[ib * 6];
+                    edge3D[vertCount * 3 + 1] = projectedVerts[ib * 6 + 1];
+                    edge3D[vertCount * 3 + 2] = projectedVerts[ib * 6 + 2];
+                    vertCount++;
+                }
             }
             glBindBuffer(GL_ARRAY_BUFFER, edgeVBO);
-            glBufferSubData(GL_ARRAY_BUFFER, 0, edges.size() * 2 * 3 * sizeof(float), edge3D.data());
+            glBufferSubData(GL_ARRAY_BUFFER, 0, vertCount * 3 * sizeof(float), edge3D.data());
 
             glDisable(GL_DEPTH_TEST);
             glUseProgram(edgeProgram);
             glUniform1f(edgeUAspect, aspect);
             glUniform1f(edgeUDist3D, 3.0f * focalLength);
             glBindVertexArray(edgeVAO);
-            glDrawArrays(GL_LINES, 0, edges.size() * 2);
+            if (renderMode == 1) {
+                size_t offset = 0;
+                for (size_t i = 0; i < edges.size(); i++) {
+                    glDrawArrays(GL_LINE_STRIP, (GLint)offset, EDGE_SUBDIV + 1);
+                    offset += EDGE_SUBDIV + 1;
+                }
+            } else {
+                glDrawArrays(GL_LINES, 0, (GLsizei)vertCount);
+            }
             glEnable(GL_DEPTH_TEST);
         }
 
@@ -1429,6 +1622,9 @@ int main(int argc, char* argv[]) {
     glDeleteBuffers(1, &tessEBO);
     glDeleteVertexArrays(1, &axesVAO);
     glDeleteBuffers(1, &axesVBO);
+    glDeleteVertexArrays(1, &subVAO);
+    glDeleteBuffers(1, &subVBO);
+    glDeleteBuffers(1, &subEBO);
     glDeleteVertexArrays(1, &edgeVAO);
     glDeleteBuffers(1, &edgeVBO);
     glDeleteProgram(edgeProgram);
