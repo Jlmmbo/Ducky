@@ -29,8 +29,14 @@ else()
     find_package(OpenGL REQUIRED)
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(GLFW REQUIRED glfw3)
-    add_executable(ducky src/main.cpp)
-target_sources(ducky PRIVATE src/glad.c)
+    add_executable(ducky src/main.cpp src/glad.c)
+    target_sources(ducky PRIVATE
+        src/main.hpp
+        src/transform.hpp
+        src/shader.hpp
+        src/render.hpp
+        src/io.hpp
+    )
     target_include_directories(ducky PRIVATE ${GLFW_INCLUDE_DIRS})
     target_link_libraries(ducky ${OPENGL_LIBRARIES} ${GLFW_LIBRARIES})
 endif()

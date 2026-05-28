@@ -161,8 +161,12 @@ Ducky/
 ├── cmake/
 │   └── mingw-toolchain.cmake   # MinGW cross-compilation toolchain
 ├── src/                        # Source files
-│   ├── main.cpp                # Main application & rendering loop
-│   ├── main.hpp                # Model loading (LoadModel)
+│   ├── main.cpp                # Application entry point & main loop
+│   ├── main.hpp                # Model struct & loader (LoadModel)
+│   ├── transform.hpp           # N-D transform, rotation, & projection math
+│   ├── shader.hpp              # Shader compilation & loading helpers
+│   ├── render.hpp              # Edge generation, face colors, draw utilities
+│   ├── io.hpp                  # Screenshot & state save/load
 │   ├── glad.c                  # OpenGL loader
 │   ├── stb_image.h             # Texture loading
 │   └── stb_easy_font.h         # Bitmap font rendering

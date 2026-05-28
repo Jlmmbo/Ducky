@@ -1,24 +1,19 @@
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 #include <iostream>
-#include <fstream>
 #include <string>
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <vector>
 #include <cstring>
-#include <set>
-#include <map>
 #include <ctime>
 
-#ifdef _WIN32
-#include <malloc.h>
-#else
-#include <alloca.h>
-#endif
-
 #include "main.hpp"
+#include "transform.hpp"
+#include "shader.hpp"
+#include "render.hpp"
+#include "io.hpp"
 
 #define STB_EASY_FONT_IMPLEMENTATION
 #include "stb_easy_font.h"
@@ -35,7 +30,6 @@ constexpr float LABEL_WIDTH = 36.0f;
 constexpr float VALUE_WIDTH = 55.0f;
 constexpr float PAD = 6.0f;
 
-constexpr float PI = 3.141592653589793f;
 constexpr int EDGE_SUBDIV = 32;
 
 static const char* UI_VERT_SRC = R"(
@@ -57,201 +51,6 @@ void main() {
 }
 )";
 
-struct TransformND {
-    std::vector<float> angles;
-    std::vector<float> translation;
-    std::vector<bool> autoRotate;
-    unsigned int dims = 0;
-
-    int planeCount() const { return dims * (dims - 1) / 2; }
-
-    int planeIndex(int i, int j) const {
-        int idx = 0;
-        for (int a = 0; a < i; a++)
-            idx += dims - a - 1;
-        return idx + (j - i - 1);
-    }
-};
-
-struct MouseState {
-    double x = 0, y = 0;
-    double lastX = 0, lastY = 0;
-    bool left = false;
-    bool leftPressed = false;
-    bool leftReleased = false;
-    bool right = false;
-    bool rightPressed = false;
-    bool rightReleased = false;
-    bool moved = false;
-};
-
-struct Edge { int a, b; };
-
-static void hslToRgb(float h, float s, float l, float& r, float& g, float& b) {
-    auto hueToRgb = [](float p, float q, float t) {
-        if (t < 0.0f) t += 1.0f;
-        if (t > 1.0f) t -= 1.0f;
-        if (t < 1.0f/6.0f) return p + (q - p) * 6.0f * t;
-        if (t < 1.0f/2.0f) return q;
-        if (t < 2.0f/3.0f) return p + (q - p) * (2.0f/3.0f - t) * 6.0f;
-        return p;
-    };
-    if (s == 0.0f) {
-        r = g = b = l;
-    } else {
-        float q = l < 0.5f ? l * (1.0f + s) : l + s - l * s;
-        float p = 2.0f * l - q;
-        r = hueToRgb(p, q, h + 1.0f/3.0f);
-        g = hueToRgb(p, q, h);
-        b = hueToRgb(p, q, h - 1.0f/3.0f);
-    }
-}
-
-static void rotatePlane(float& a, float& b, float angle) {
-    float c = cosf(angle), s = sinf(angle);
-    float na = a * c - b * s;
-    float nb = a * s + b * c;
-    a = na;
-    b = nb;
-}
-
-static void applyRotation(float* pos, const TransformND& t) {
-    for (int i = 0; i < (int)t.dims; i++) {
-        for (int j = i + 1; j < (int)t.dims; j++) {
-            float angle = t.angles[t.planeIndex(i, j)];
-            if (fabsf(angle) > 0.0001f)
-                rotatePlane(pos[i], pos[j], angle);
-        }
-    }
-}
-
-static void projectPerspective(const float* in, float* out, int dims, float focalLength) {
-    float* tmp = (float*)alloca(dims * sizeof(float));
-    for (int i = 0; i < dims; i++) tmp[i] = in[i];
-
-    for (int d = dims - 1; d >= 3; d--) {
-        float dist = (float)d * focalLength;
-        float depth = dist - tmp[d];
-        float scale = depth > 0.001f ? dist / depth : 10.0f;
-        for (int c = 0; c < d; c++)
-            tmp[c] *= scale;
-    }
-
-    out[0] = tmp[0];
-    out[1] = tmp[1];
-    out[2] = tmp[2];
-}
-
-static void projectOrthographic(const float* in, float* out, int dims) {
-    out[0] = in[0];
-    out[1] = in[1];
-    out[2] = dims > 2 ? in[2] : 0.0f;
-}
-
-static void projectStereographic(const float* in, float* out, int dims, float focalLength) {
-    float tmp[128];
-    for (int i = 0; i < dims; i++) tmp[i] = in[i];
-
-    // Project dims 5+ down to 4D using perspective
-    for (int d = dims - 1; d >= 4; d--) {
-        float dist = (float)d * focalLength;
-        float depth = dist - tmp[d];
-        float s = depth > 0.001f ? dist / depth : 10.0f;
-        for (int c = 0; c < d; c++)
-            tmp[c] *= s;
-    }
-
-    // Stereographic projection from 4D to 3D from north pole (0,0,0,R) to plane w=0
-    float x = tmp[0], y = tmp[1], z = tmp[2], w = dims > 3 ? tmp[3] : 0.0f;
-    float radius = sqrtf(x*x + y*y + z*z + w*w);
-    float denom = radius - w;
-    if (fabsf(denom) < 0.001f) denom = 0.001f;
-    float s = radius / denom;
-    out[0] = x * s;
-    out[1] = y * s;
-    out[2] = z * s;
-}
-
-static std::string loadFile(const std::string& path) {
-    std::ifstream file(path, std::ios::binary);
-    if (!file.is_open()) {
-        std::cerr << "Failed to load file: " << path << std::endl;
-        return "";
-    }
-    return std::string((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-}
-
-static void checkShaderCompile(GLuint shader, const std::string& type) {
-    int success;
-    glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
-    if (!success) {
-        char log[512];
-        glGetShaderInfoLog(shader, 512, nullptr, log);
-        std::cerr << type << " shader error:\n" << log << std::endl;
-    }
-}
-
-static void checkProgramLink(GLuint program) {
-    int success;
-    glGetProgramiv(program, GL_LINK_STATUS, &success);
-    if (!success) {
-        char log[512];
-        glGetProgramInfoLog(program, 512, nullptr, log);
-        std::cerr << "Program link error:\n" << log << std::endl;
-    }
-}
-
-static GLuint createShaderProgram(const std::string& vertPath, const std::string& fragPath) {
-    std::string vertSrc = loadFile(vertPath);
-    std::string fragSrc = loadFile(fragPath);
-    if (vertSrc.empty() || fragSrc.empty()) return 0;
-
-    const char* vertCStr = vertSrc.c_str();
-    GLuint vertShader = glCreateShader(GL_VERTEX_SHADER);
-    glShaderSource(vertShader, 1, &vertCStr, nullptr);
-    glCompileShader(vertShader);
-    checkShaderCompile(vertShader, "Vertex");
-
-    const char* fragCStr = fragSrc.c_str();
-    GLuint fragShader = glCreateShader(GL_FRAGMENT_SHADER);
-    glShaderSource(fragShader, 1, &fragCStr, nullptr);
-    glCompileShader(fragShader);
-    checkShaderCompile(fragShader, "Fragment");
-
-    GLuint program = glCreateProgram();
-    glAttachShader(program, vertShader);
-    glAttachShader(program, fragShader);
-    glLinkProgram(program);
-    checkProgramLink(program);
-
-    glDeleteShader(vertShader);
-    glDeleteShader(fragShader);
-
-    return program;
-}
-
-static GLuint createShaderProgramFromSrc(const char* vertSrc, const char* fragSrc) {
-    GLuint vertShader = glCreateShader(GL_VERTEX_SHADER);
-    glShaderSource(vertShader, 1, &vertSrc, nullptr);
-    glCompileShader(vertShader);
-    checkShaderCompile(vertShader, "UI Vertex");
-
-    GLuint fragShader = glCreateShader(GL_FRAGMENT_SHADER);
-    glShaderSource(fragShader, 1, &fragSrc, nullptr);
-    glCompileShader(fragShader);
-    checkShaderCompile(fragShader, "UI Fragment");
-
-    GLuint program = glCreateProgram();
-    glAttachShader(program, vertShader);
-    glAttachShader(program, fragShader);
-    glLinkProgram(program);
-    checkProgramLink(program);
-
-    glDeleteShader(vertShader);
-    glDeleteShader(fragShader);
-    return program;
-}
-
 static void processInput(GLFWwindow* window, TransformND& t) {
     int planeKeysPos[] = {
         GLFW_KEY_1, GLFW_KEY_3, GLFW_KEY_5, GLFW_KEY_7,
@@ -269,7 +68,6 @@ static void processInput(GLFWwindow* window, TransformND& t) {
             t.angles[i] -= ROTATE_SPEED;
     }
 
-    // Additional planes for 6D+ (Ctrl+letter pairs)
     int extraKeysPos[] = {
         GLFW_KEY_Q, GLFW_KEY_E, GLFW_KEY_T, GLFW_KEY_U,
         GLFW_KEY_O, GLFW_KEY_LEFT_BRACKET
@@ -291,210 +89,6 @@ static void processInput(GLFWwindow* window, TransformND& t) {
     if (glfwGetKey(window, GLFW_KEY_R) == GLFW_PRESS) {
         std::fill(t.angles.begin(), t.angles.end(), 0.0f);
         std::fill(t.translation.begin(), t.translation.end(), 0.0f);
-    }
-
-}
-
-static std::vector<Edge> generateEdges(const float* vertices, unsigned int vertexCount,
-                                        unsigned int dims, int fpv,
-                                        const unsigned int* indices, unsigned int indexCount) {
-    // Build position → canonical index (first occurrence)
-    std::vector<int> canonical(vertexCount);
-    std::vector<int> reverseCanonical; // canonical index → any actual vertex index
-    for (unsigned int i = 0; i < vertexCount; i++) {
-        int found = -1;
-        for (size_t j = 0; j < reverseCanonical.size(); j++) {
-            int ci = reverseCanonical[j];
-            bool same = true;
-            for (unsigned int d = 0; d < dims; d++) {
-                if (fabsf(vertices[i * fpv + d] - vertices[ci * fpv + d]) > 0.001f) {
-                    same = false;
-                    break;
-                }
-            }
-            if (same) { found = (int)j; break; }
-        }
-        if (found < 0) {
-            found = (int)reverseCanonical.size();
-            reverseCanonical.push_back((int)i);
-        }
-        canonical[i] = found;
-    }
-    unsigned int uniqueCount = (unsigned int)reverseCanonical.size();
-
-    // Brute-force edge detection on unique vertices
-    std::set<std::pair<int,int>> edgeSet;
-    for (unsigned int a = 0; a < uniqueCount; a++) {
-        int ai = reverseCanonical[a];
-        for (unsigned int b = a + 1; b < uniqueCount; b++) {
-            int bi = reverseCanonical[b];
-            int diff = 0;
-            for (unsigned int d = 0; d < dims; d++) {
-                if (fabsf(vertices[ai * fpv + d] - vertices[bi * fpv + d]) > 0.001f)
-                    diff++;
-            }
-            if (diff == 1)
-                edgeSet.insert({(int)a, (int)b});
-        }
-    }
-
-    if (!edgeSet.empty()) {
-        std::vector<Edge> edges;
-        edges.reserve(edgeSet.size());
-        for (auto& e : edgeSet)
-            edges.push_back({reverseCanonical[e.first], reverseCanonical[e.second]});
-        return edges;
-    }
-
-    // Fallback: count triangle edge occurrences per unique vertex
-    std::map<std::pair<int,int>, int> edgeCounts;
-    for (unsigned int t = 0; t < indexCount / 3; t++) {
-        int tri[3] = {
-            canonical[indices[t * 3]],
-            canonical[indices[t * 3 + 1]],
-            canonical[indices[t * 3 + 2]]
-        };
-        for (int k = 0; k < 3; k++) {
-            int a = tri[k], b = tri[(k + 1) % 3];
-            if (a == b) continue;
-            if (a > b) std::swap(a, b);
-            edgeCounts[{a, b}]++;
-        }
-    }
-
-    std::vector<Edge> edges;
-    edges.reserve(edgeCounts.size());
-    for (auto& ec : edgeCounts)
-        edges.push_back({reverseCanonical[ec.first.first], reverseCanonical[ec.first.second]});
-    return edges;
-}
-
-static void drawRect(GLuint program, GLuint vao, GLuint vbo,
-                     float x, float y, float w, float h,
-                     float r, float g, float b, float a,
-                     float screenW, float screenH) {
-    float verts[8] = {
-        x, y, x+w, y, x+w, y+h,
-        x, y+h
-    };
-    glBindBuffer(GL_ARRAY_BUFFER, vbo);
-    glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(verts), verts);
-    glUseProgram(program);
-    glUniform2f(glGetUniformLocation(program, "uScreenSize"), screenW, screenH);
-    glUniform4f(glGetUniformLocation(program, "uColor"), r, g, b, a);
-    glBindVertexArray(vao);
-    glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
-}
-
-static int drawTextAt(GLuint vao, GLuint vbo, GLuint ebo, GLuint program,
-                      float x, float y, const char* text,
-                      float screenW, float screenH,
-                      const unsigned int* indices, int maxQuads) {
-    static std::vector<char> buf(2048);
-    int nq = stb_easy_font_print(x, y, (char*)text, nullptr, buf.data(), (int)buf.size());
-    if (nq <= 0 || nq > maxQuads) return 0;
-    glBindBuffer(GL_ARRAY_BUFFER, vbo);
-    glBufferSubData(GL_ARRAY_BUFFER, 0, nq * 64, buf.data());
-    glUseProgram(program);
-    glUniform2f(glGetUniformLocation(program, "uScreenSize"), screenW, screenH);
-    glBindVertexArray(vao);
-    glDrawElements(GL_TRIANGLES, nq * 6, GL_UNSIGNED_INT, nullptr);
-    return nq;
-}
-
-static void writeTGA(const char* path, int w, int h, unsigned char* data) {
-    FILE* f = fopen(path, "wb");
-    if (!f) return;
-    unsigned char header[18] = {0};
-    header[2] = 2;
-    header[12] = w & 0xFF;
-    header[13] = (w >> 8) & 0xFF;
-    header[14] = h & 0xFF;
-    header[15] = (h >> 8) & 0xFF;
-    header[16] = 24;
-    fwrite(header, 1, 18, f);
-    for (int y = h - 1; y >= 0; y--)
-        fwrite(data + y * w * 3, 1, w * 3, f);
-    fclose(f);
-}
-
-static void saveState(const char* path, const TransformND& t) {
-    FILE* f = fopen(path, "w");
-    if (!f) { std::cerr << "Failed to save state\n"; return; }
-    fprintf(f, "%u\n", t.dims);
-    for (float a : t.angles) fprintf(f, "%.8f ", a);
-    fprintf(f, "\n");
-    for (float tr : t.translation) fprintf(f, "%.8f ", tr);
-    fprintf(f, "\n");
-    fclose(f);
-    std::cout << "Saved state to " << path << std::endl;
-}
-
-static bool loadState(const char* path, TransformND& t) {
-    FILE* f = fopen(path, "r");
-    if (!f) { std::cerr << "Failed to load state\n"; return false; }
-    unsigned int dims;
-    if (fscanf(f, "%u", &dims) != 1 || dims != t.dims) {
-        fclose(f);
-        std::cerr << "State file dimension mismatch\n";
-        return false;
-    }
-    std::vector<float> newAngles(t.planeCount());
-    std::vector<float> newTranslations(t.dims);
-    bool ok = true;
-    for (int i = 0; i < t.planeCount(); i++) {
-        if (fscanf(f, "%f", &newAngles[i]) != 1) { ok = false; break; }
-    }
-    if (ok) {
-        for (unsigned int i = 0; i < t.dims; i++) {
-            if (fscanf(f, "%f", &newTranslations[i]) != 1) { ok = false; break; }
-        }
-    }
-    fclose(f);
-    if (!ok) {
-        std::cerr << "Failed to read full state from " << path << std::endl;
-        return false;
-    }
-    t.angles = newAngles;
-    t.translation = newTranslations;
-    std::cout << "Loaded state from " << path << std::endl;
-    return true;
-}
-
-static void assignFaceColors(Model& model, int colorScheme) {
-    if (model.vertexCount == 0 || model.indexCount == 0) return;
-    unsigned int dims = model.dimensions;
-    int fpv = dims + 3;
-    unsigned int faces = model.indexCount / 3;
-    const float goldenRatio = 0.618033988749895f;
-
-    for (unsigned int f = 0; f < faces; f++) {
-        float h;
-        switch (colorScheme) {
-            case 1: // rainbow
-                h = (float)f / (float)faces;
-                break;
-            case 2: // monochrome blue
-                h = 0.6f;
-                break;
-            case 3: // warm
-                h = 0.0f + (float)(f % 10) * 0.05f;
-                break;
-            default: // golden ratio
-                h = f * goldenRatio;
-                h = h - floorf(h);
-                break;
-        }
-        float s = (colorScheme == 2) ? 0.4f : 0.85f;
-        float l = 0.45f + ((f / 8) % 3) * 0.2f;
-        float r, g, b;
-        hslToRgb(h, s, l, r, g, b);
-        for (int j = 0; j < 3; j++) {
-            int vi = model.indices[f * 3 + j];
-            model.vertices[vi * fpv + dims] = r;
-            model.vertices[vi * fpv + dims + 1] = g;
-            model.vertices[vi * fpv + dims + 2] = b;
-        }
     }
 }
 
@@ -533,11 +127,11 @@ int main(int argc, char* argv[]) {
     // === State variables ===
     bool showPerformance = false;
     bool wireframeOnly = false;
-    int colorScheme = 0; // 0=Model, 1=Golden, 2=Rainbow, 3=Mono, 4=Warm
+    int colorScheme = 0;
     const char* colorSchemeNames[5] = {"Model", "Golden", "Rainbow", "Mono", "Warm"};
     int rotPreset = 1;
     float focalLength = 1.0f;
-    int renderMode = 0; // 0=Perspective, 1=Stereographic, 2=Orthographic
+    int renderMode = 0;
     const char* renderModeNames[] = {"Perspective", "Stereographic", "Orthographic"};
     int fullscreenW = 0, fullscreenH = 0;
     int windowedX = 0, windowedY = 0, windowedW = WINDOW_WIDTH, windowedH = WINDOW_HEIGHT;
@@ -996,8 +590,8 @@ int main(int argc, char* argv[]) {
                 double dx = mouse.x - mouse.lastX;
                 double dy = mouse.y - mouse.lastY;
                 if (dims >= 3) {
-                    transform.angles[1] -= (float)dx * 0.005f;          // XZ (yaw)
-                    transform.angles[dims - 1] += (float)dy * 0.005f;   // YZ (pitch)
+                    transform.angles[1] -= (float)dx * 0.005f;
+                    transform.angles[dims - 1] += (float)dy * 0.005f;
                 } else if (transform.planeCount() >= 1) {
                     transform.angles[0] += (float)dx * 0.005f;
                 }
@@ -1079,7 +673,6 @@ int main(int argc, char* argv[]) {
 
             if (mouse.leftReleased) {
                 if (clickedButton >= 0) {
-                    // Process button action
                     switch (clickedButton) {
                         case BTN_RESET:
                             std::fill(transform.angles.begin(), transform.angles.end(), 0.0f);
@@ -1131,7 +724,6 @@ int main(int argc, char* argv[]) {
                 clickedButton = -1;
             }
 
-            // Check button clicks on press
             if (mouse.leftPressed && clickedButton < 0) {
                 int btnW = 76, btnH = 24, gap = 4, colGap = 5;
                 int btnStartX = (int)((float)fbW - 260.0f + 8);
@@ -1182,7 +774,6 @@ int main(int argc, char* argv[]) {
             unsigned int numTri = model.indexCount / 3;
 
             if (renderMode == 1) {
-                // Subdivide triangles for stereographic mode
                 int n = EDGE_SUBDIV;
                 int vertsPerTri = (n + 1) * (n + 2) / 2;
                 int trisPerTri = n * n;
@@ -1225,7 +816,6 @@ int main(int argc, char* argv[]) {
                     unsigned int triVertBase = t * vertsPerTri;
                     unsigned int triTriBase = t * trisPerTri;
 
-                    // Generate grid vertices
                     for (int j = 0; j <= n; j++) {
                         int rowOff = j * (n + 1) - j * (j - 1) / 2;
                         for (int i = 0; i <= n - j; i++) {
@@ -1244,7 +834,6 @@ int main(int argc, char* argv[]) {
                         }
                     }
 
-                    // Generate sub-triangle indices and compute depths
                     unsigned int subTriCount = 0;
                     for (int j = 0; j < n; j++) {
                         int rowOffJ = j * (n + 1) - j * (j - 1) / 2;
@@ -1256,7 +845,6 @@ int main(int argc, char* argv[]) {
 
                             unsigned int ti = triTriBase + subTriCount;
 
-                            // Lower triangle
                             subIdx[ti * 3 + 0] = v00;
                             subIdx[ti * 3 + 1] = v10;
                             subIdx[ti * 3 + 2] = v01;
@@ -1264,7 +852,6 @@ int main(int argc, char* argv[]) {
                             subDepths[ti].depth = (subVerts[v00 * 6 + 2] + subVerts[v10 * 6 + 2] + subVerts[v01 * 6 + 2]) / 3.0f;
                             subTriCount++;
 
-                            // Upper triangle (if not on diagonal)
                             if (i + j < n - 1) {
                                 unsigned int v11 = triVertBase + rowOffJ1 + i + 1;
                                 unsigned int ti2 = triTriBase + subTriCount;
@@ -1279,11 +866,9 @@ int main(int argc, char* argv[]) {
                     }
                 }
 
-                // Sort sub-triangles by depth
                 std::sort(subDepths.begin(), subDepths.end(),
                           [](auto& a, auto& b) { return a.depth > b.depth; });
 
-                // Reorder indices
                 std::vector<unsigned int> sortedSubIdx(totalSubTris * 3);
                 for (unsigned int i = 0; i < totalSubTris; i++) {
                     int t = subDepths[i].idx;
@@ -1292,7 +877,6 @@ int main(int argc, char* argv[]) {
                     sortedSubIdx[i * 3 + 2] = subIdx[t * 3 + 2];
                 }
 
-                // Upload subdivided geometry
                 glBindBuffer(GL_ARRAY_BUFFER, subVBO);
                 glBufferSubData(GL_ARRAY_BUFFER, 0, totalSubVerts * 6 * sizeof(float), subVerts.data());
                 glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, subEBO);
@@ -1320,7 +904,6 @@ int main(int argc, char* argv[]) {
                     }
                 }
             } else {
-                // Original path for perspective/orthographic
                 triDepths.resize(numTri);
                 for (unsigned int i = 0; i < numTri; i++) {
                     float sum = 0;
@@ -1613,9 +1196,9 @@ int main(int argc, char* argv[]) {
             char perfStr[128];
             snprintf(perfStr, sizeof(perfStr), "FPS: %.1f  Verts: %u  Tris: %u",
                      perfFps, model.vertexCount, model.indexCount / 3);
-            int nq = drawTextAt(dtVAO, dtVBO, dtEBO, textProgram,
-                                (float)fbW - 250.0f, (float)fbH - 30.0f, perfStr,
-                                (float)fbW, (float)fbH, dtIndices.data(), TEXT_MAX_QUADS);
+            drawTextAt(dtVAO, dtVBO, dtEBO, textProgram,
+                       (float)fbW - 250.0f, (float)fbH - 30.0f, perfStr,
+                       (float)fbW, (float)fbH, dtIndices.data(), TEXT_MAX_QUADS);
         }
 
         // HUD text hint
