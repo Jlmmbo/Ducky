@@ -121,7 +121,7 @@ int main(int argc, char* argv[]) {
     }
 
     glfwSwapInterval(1);
-    int fbW = 0, fbH = 0;
+    int fbW = 0, fbH = 0, winW = 0, winH = 0;
     glEnable(GL_DEPTH_TEST);
 
     // === State variables ===
@@ -340,6 +340,7 @@ int main(int argc, char* argv[]) {
     transform.translation.resize(dims, 0.0f);
 
     std::vector<float> projectedVerts(model.vertexCount * 6);
+    std::vector<float> rotatedND(model.vertexCount * dims);
 
     // UI state
     MouseState mouse = {};
@@ -575,13 +576,24 @@ int main(int argc, char* argv[]) {
             rightBracketPrev = rightBracketNow;
         }
 
+        // Framebuffer and window size for HiDPI-aware mouse coord conversion
+        glfwGetFramebufferSize(window, &fbW, &fbH);
+        glfwGetWindowSize(window, &winW, &winH);
+        float uiScaleX = 1.0f, uiScaleY = 1.0f;
+        if (winW > 0 && winH > 0) {
+            uiScaleX = (float)fbW / (float)winW;
+            uiScaleY = (float)fbH / (float)winH;
+        }
+        float mx_fb = mouse.x * uiScaleX;
+        float my_fb = mouse.y * uiScaleY;
+
         // Mouse orbit (right-click drag)
         {
             if (mouse.rightPressed) {
                 int nSliders = transform.planeCount();
                 float panelH = PAD * 2.0f + 24.0f + (float)nSliders * SLIDER_HEIGHT + 10.0f;
-                bool overSlider = mouse.x >= 10.0f && mouse.x <= 10.0f + PANEL_WIDTH &&
-                                  mouse.y >= 10.0f && mouse.y <= 10.0f + panelH;
+                bool overSlider = mx_fb >= 10.0f && mx_fb <= 10.0f + PANEL_WIDTH &&
+                                  my_fb >= 10.0f && my_fb <= 10.0f + panelH;
                 if (!overSlider && !mouse.left)
                     orbitMode = true;
             }
@@ -598,7 +610,7 @@ int main(int argc, char* argv[]) {
             }
         }
 
-        // Per-plane auto-rotation with clamped delta
+        // Per-plane auto-rotation with clamped delta, wrapping to [-PI, PI)
         {
             double now = glfwGetTime();
             float dt = std::min((float)(now - lastTime), 0.05f);
@@ -607,24 +619,24 @@ int main(int argc, char* argv[]) {
             for (int i = 0; i < transform.planeCount(); i++) {
                 if (transform.autoRotate[i])
                     transform.angles[i] += dt * 0.5f * (1 + (i % 3));
+                float a = transform.angles[i];
+                a = fmodf(a + PI, 2.0f * PI);
+                if (a < 0) a += 2.0f * PI;
+                transform.angles[i] = a - PI;
             }
         }
 
-        // Wrap all angles to [-PI, PI)
-        for (int i = 0; i < transform.planeCount(); i++) {
-            float a = transform.angles[i];
-            transform.angles[i] = fmodf(a + PI, 2.0f * PI);
-            if (transform.angles[i] < 0) transform.angles[i] += 2.0f * PI;
-            transform.angles[i] -= PI;
-        }
-
-        glfwGetFramebufferSize(window, &fbW, &fbH);
         glViewport(0, 0, fbW, fbH);
         float aspect = (float)fbW / (float)fbH;
 
+        // Only update title when data changes
+        static char lastTitle[128] = {};
         snprintf(titleBuf, sizeof(titleBuf), "Ducky - %uD (%u verts, %zu edges) [F1=perf]",
                  dims, model.vertexCount, edges.size());
-        glfwSetWindowTitle(window, titleBuf);
+        if (strcmp(titleBuf, lastTitle) != 0) {
+            glfwSetWindowTitle(window, titleBuf);
+            memcpy(lastTitle, titleBuf, sizeof(titleBuf));
+        }
 
         // Process slider mouse interaction
         {
@@ -642,8 +654,8 @@ int main(int argc, char* argv[]) {
                 for (int i = 0; i < nSliders; i++) {
                     float rowY = panelTop + PAD + titleH + PAD + i * SLIDER_HEIGHT;
                     float tglY = rowY + (SLIDER_HEIGHT - TOGGLE_SIZE) / 2;
-                    if (mouse.x >= toggleX && mouse.x <= toggleX + TOGGLE_SIZE &&
-                        mouse.y >= tglY && mouse.y <= tglY + TOGGLE_SIZE) {
+                    if (mx_fb >= toggleX && mx_fb <= toggleX + TOGGLE_SIZE &&
+                        my_fb >= tglY && my_fb <= tglY + TOGGLE_SIZE) {
                         transform.autoRotate[i] = !transform.autoRotate[i];
                         sliderHit = true;
                         break;
@@ -653,10 +665,10 @@ int main(int argc, char* argv[]) {
                     dragSlider = -1;
                     for (int i = 0; i < nSliders; i++) {
                         float rowY = panelTop + PAD + titleH + PAD + i * SLIDER_HEIGHT;
-                        if (mouse.x >= trackX && mouse.x <= trackX + trackW &&
-                            mouse.y >= rowY && mouse.y <= rowY + SLIDER_HEIGHT) {
+                        if (mx_fb >= trackX && mx_fb <= trackX + trackW &&
+                            my_fb >= rowY && my_fb <= rowY + SLIDER_HEIGHT) {
                             dragSlider = i;
-                            float t = (float)((mouse.x - trackX) / trackW);
+                            float t = (float)((mx_fb - trackX) / trackW);
                             t = std::max(0.0f, std::min(1.0f, t));
                             transform.angles[i] = -PI + t * (2.0f * PI);
                             break;
@@ -666,7 +678,7 @@ int main(int argc, char* argv[]) {
             }
 
             if (dragSlider >= 0 && mouse.left) {
-                float t = (float)((mouse.x - trackX) / trackW);
+                float t = (float)((mx_fb - trackX) / trackW);
                 t = std::max(0.0f, std::min(1.0f, t));
                 transform.angles[dragSlider] = -PI + t * (2.0f * PI);
             }
@@ -734,8 +746,8 @@ int main(int argc, char* argv[]) {
                     int row = b / btnCols;
                     int bx = btnStartX + col * (btnW + colGap);
                     int by = btnStartY + row * (btnH + gap);
-                    if (mouse.x >= bx && mouse.x <= bx + btnW &&
-                        mouse.y >= by && mouse.y <= by + btnH) {
+                    if (mx_fb >= bx && mx_fb <= bx + btnW &&
+                        my_fb >= by && my_fb <= by + btnH) {
                         clickedButton = b;
                         break;
                     }
@@ -745,8 +757,8 @@ int main(int argc, char* argv[]) {
             hoverSlider = -1;
             for (int i = 0; i < nSliders; i++) {
                 float rowY = panelTop + PAD + titleH + PAD + i * SLIDER_HEIGHT;
-                if (mouse.x >= trackX && mouse.x <= trackX + trackW &&
-                    mouse.y >= rowY && mouse.y <= rowY + SLIDER_HEIGHT)
+                if (mx_fb >= trackX && mx_fb <= trackX + trackW &&
+                    my_fb >= rowY && my_fb <= rowY + SLIDER_HEIGHT)
                     hoverSlider = i;
             }
         }
@@ -759,6 +771,8 @@ int main(int argc, char* argv[]) {
             for (unsigned int d = 0; d < dims; d++)
                 pos[d] += transform.translation[d];
             applyRotation(pos, transform);
+            for (unsigned int d = 0; d < dims; d++)
+                rotatedND[i * dims + d] = pos[d];
             switch (renderMode) {
                 case 0: projectPerspective(pos, &projectedVerts[i * 6], dims, focalLength); break;
                 case 1: projectStereographic(pos, &projectedVerts[i * 6], dims, focalLength); break;
@@ -795,13 +809,10 @@ int main(int argc, char* argv[]) {
                     int ic = model.indices[t * 3 + 2];
 
                     for (unsigned int d = 0; d < dims; d++) {
-                        tposA[d] = model.vertices[ia * fpv + d] + transform.translation[d];
-                        tposB[d] = model.vertices[ib * fpv + d] + transform.translation[d];
-                        tposC[d] = model.vertices[ic * fpv + d] + transform.translation[d];
+                        tposA[d] = rotatedND[ia * dims + d];
+                        tposB[d] = rotatedND[ib * dims + d];
+                        tposC[d] = rotatedND[ic * dims + d];
                     }
-                    applyRotation(tposA, transform);
-                    applyRotation(tposB, transform);
-                    applyRotation(tposC, transform);
 
                     float rA = model.vertices[ia * fpv + dims];
                     float gA = model.vertices[ia * fpv + dims + 1];
@@ -953,7 +964,8 @@ int main(int argc, char* argv[]) {
             }
         }
 
-        // Draw axes
+        // Draw axes (on top of everything)
+        glDisable(GL_DEPTH_TEST);
         {
             float* origin = (float*)alloca(dims * sizeof(float));
             float* tip = (float*)alloca(dims * sizeof(float));
@@ -963,8 +975,16 @@ int main(int argc, char* argv[]) {
                 tip[d] = AXIS_LENGTH;
                 applyRotation(origin, transform);
                 applyRotation(tip, transform);
-                projectPerspective(origin, &axis3D[d * 12], dims, focalLength);
-                projectPerspective(tip, &axis3D[d * 12 + 6], dims, focalLength);
+                switch (renderMode) {
+                    case 0: projectPerspective(origin, &axis3D[d * 12], dims, focalLength); break;
+                    case 1: projectStereographic(origin, &axis3D[d * 12], dims, focalLength); break;
+                    default: projectOrthographic(origin, &axis3D[d * 12], dims); break;
+                }
+                switch (renderMode) {
+                    case 0: projectPerspective(tip, &axis3D[d * 12 + 6], dims, focalLength); break;
+                    case 1: projectStereographic(tip, &axis3D[d * 12 + 6], dims, focalLength); break;
+                    default: projectOrthographic(tip, &axis3D[d * 12 + 6], dims); break;
+                }
                 axis3D[d * 12 + 3] = axisR[d]; axis3D[d * 12 + 4] = axisG[d]; axis3D[d * 12 + 5] = axisB[d];
                 axis3D[d * 12 + 9] = axisR[d]; axis3D[d * 12 + 10] = axisG[d]; axis3D[d * 12 + 11] = axisB[d];
             }
@@ -976,6 +996,7 @@ int main(int argc, char* argv[]) {
             glBindVertexArray(axesVAO);
             glDrawArrays(GL_LINES, 0, dims * 2);
         }
+        glEnable(GL_DEPTH_TEST);
 
         // Draw wireframe edges
         {
@@ -987,11 +1008,9 @@ int main(int argc, char* argv[]) {
                 for (size_t i = 0; i < edges.size(); i++) {
                     int ia = edges[i].a, ib = edges[i].b;
                     for (unsigned int d = 0; d < dims; d++) {
-                        posA[d] = model.vertices[ia * fpv + d] + transform.translation[d];
-                        posB[d] = model.vertices[ib * fpv + d] + transform.translation[d];
+                        posA[d] = rotatedND[ia * dims + d];
+                        posB[d] = rotatedND[ib * dims + d];
                     }
-                    applyRotation(posA, transform);
-                    applyRotation(posB, transform);
                     for (int s = 0; s <= EDGE_SUBDIV; s++) {
                         float t = (float)s / (float)EDGE_SUBDIV;
                         for (unsigned int d = 0; d < dims; d++)
@@ -1172,8 +1191,8 @@ int main(int argc, char* argv[]) {
                 int row = b / btnCols;
                 int bx = btnStartX + col * (btnW + colGap);
                 int by = btnStartY + row * (btnH + gap);
-                bool hovered = (mouse.x >= bx && mouse.x <= bx + btnW &&
-                                mouse.y >= by && mouse.y <= by + btnH);
+                bool hovered = (mx_fb >= bx && mx_fb <= bx + btnW &&
+                                my_fb >= by && my_fb <= by + btnH);
                 drawRect(uiProgram, uiVAO, uiVBO,
                          (float)bx, (float)by, (float)btnW, (float)btnH,
                          hovered ? 0.3f : 0.2f, hovered ? 0.3f : 0.2f, hovered ? 0.4f : 0.28f, 0.9f,
