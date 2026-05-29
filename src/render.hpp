@@ -1,8 +1,8 @@
 #pragma once
 
 #include <vector>
-#include <set>
-#include <map>
+#include <unordered_set>
+#include <unordered_map>
 #include <algorithm>
 #include <cstring>
 #include <cstdio>
@@ -12,35 +12,55 @@
 #include "main.hpp"
 #include "transform.hpp"
 
+struct PairHash {
+    size_t operator()(const std::pair<int,int>& p) const {
+        return (size_t)p.first ^ ((size_t)p.second << 16);
+    }
+};
+
 struct Edge { int a, b; };
 
 inline std::vector<Edge> generateEdges(const float* vertices, unsigned int vertexCount,
                                         unsigned int dims, int fpv,
                                         const unsigned int* indices, unsigned int indexCount) {
+    // Sort-based vertex dedup: O(N log N * dims) instead of O(N^2 * dims)
+    std::vector<int> order(vertexCount);
+    for (unsigned int i = 0; i < vertexCount; i++) order[i] = (int)i;
+    std::sort(order.begin(), order.end(), [&](int a, int b) {
+        for (unsigned int d = 0; d < dims; d++) {
+            float da = vertices[a * fpv + d];
+            float db = vertices[b * fpv + d];
+            if (da < db - 0.001f) return true;
+            if (da > db + 0.001f) return false;
+        }
+        return false;
+    });
+
     std::vector<int> canonical(vertexCount);
     std::vector<int> reverseCanonical;
     for (unsigned int i = 0; i < vertexCount; i++) {
-        int found = -1;
-        for (size_t j = 0; j < reverseCanonical.size(); j++) {
-            int ci = reverseCanonical[j];
+        int cur = order[i];
+        if (i > 0) {
+            int prev = order[i - 1];
             bool same = true;
             for (unsigned int d = 0; d < dims; d++) {
-                if (fabsf(vertices[i * fpv + d] - vertices[ci * fpv + d]) > 0.001f) {
+                if (fabsf(vertices[cur * fpv + d] - vertices[prev * fpv + d]) > 0.001f) {
                     same = false;
                     break;
                 }
             }
-            if (same) { found = (int)j; break; }
+            if (same) {
+                canonical[cur] = canonical[prev];
+                continue;
+            }
         }
-        if (found < 0) {
-            found = (int)reverseCanonical.size();
-            reverseCanonical.push_back((int)i);
-        }
-        canonical[i] = found;
+        canonical[cur] = (int)reverseCanonical.size();
+        reverseCanonical.push_back(cur);
     }
     unsigned int uniqueCount = (unsigned int)reverseCanonical.size();
 
-    std::set<std::pair<int,int>> edgeSet;
+    // Try coordinate-difference edge detection first
+    std::unordered_set<std::pair<int,int>, PairHash> edgeSet;
     for (unsigned int a = 0; a < uniqueCount; a++) {
         int ai = reverseCanonical[a];
         for (unsigned int b = a + 1; b < uniqueCount; b++) {
@@ -63,7 +83,8 @@ inline std::vector<Edge> generateEdges(const float* vertices, unsigned int verte
         return edges;
     }
 
-    std::map<std::pair<int,int>, int> edgeCounts;
+    // Fallback: shared triangle-edge detection
+    std::unordered_map<std::pair<int,int>, int, PairHash> edgeCounts;
     for (unsigned int t = 0; t < indexCount / 3; t++) {
         int tri[3] = {
             canonical[indices[t * 3]],
@@ -96,8 +117,10 @@ inline void drawRect(GLuint program, GLuint vao, GLuint vbo,
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
     glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(verts), verts);
     glUseProgram(program);
-    glUniform2f(glGetUniformLocation(program, "uScreenSize"), screenW, screenH);
-    glUniform4f(glGetUniformLocation(program, "uColor"), r, g, b, a);
+    static GLuint uScreenSizeLoc = glGetUniformLocation(program, "uScreenSize");
+    static GLuint uColorLoc = glGetUniformLocation(program, "uColor");
+    glUniform2f(uScreenSizeLoc, screenW, screenH);
+    glUniform4f(uColorLoc, r, g, b, a);
     glBindVertexArray(vao);
     glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
 }
@@ -106,13 +129,14 @@ inline int drawTextAt(GLuint vao, GLuint vbo, GLuint ebo, GLuint program,
                       float x, float y, const char* text,
                       float screenW, float screenH,
                       const unsigned int* indices, int maxQuads) {
-    static std::vector<char> buf(2048);
+    std::vector<char> buf(2048);
     int nq = stb_easy_font_print(x, y, (char*)text, nullptr, buf.data(), (int)buf.size());
     if (nq <= 0 || nq > maxQuads) return 0;
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
     glBufferSubData(GL_ARRAY_BUFFER, 0, nq * 64, buf.data());
     glUseProgram(program);
-    glUniform2f(glGetUniformLocation(program, "uScreenSize"), screenW, screenH);
+    static GLuint uScreenSizeLoc = glGetUniformLocation(program, "uScreenSize");
+    glUniform2f(uScreenSizeLoc, screenW, screenH);
     glBindVertexArray(vao);
     glDrawElements(GL_TRIANGLES, nq * 6, GL_UNSIGNED_INT, nullptr);
     return nq;
@@ -133,7 +157,7 @@ inline void assignFaceColors(Model& model, int colorScheme) {
             case 3: h = 0.0f + (float)(f % 10) * 0.05f; break;
             default: h = f * goldenRatio; h = h - floorf(h); break;
         }
-        float s = (colorScheme == 2) ? 0.4f : 0.85f;
+        float s = (colorScheme == 2) ? 0.0f : 0.85f;
         float l = 0.45f + ((f / 8) % 3) * 0.2f;
         float r, g, b;
         hslToRgb(h, s, l, r, g, b);
