@@ -102,7 +102,7 @@ inline void projectOrthographic(const float* in, float* out, int dims) {
 }
 
 inline void projectStereographic(const float* in, float* out, int dims, float focalLength) {
-    float tmp[128];
+    float* tmp = (float*)alloca(dims * sizeof(float));
     for (int i = 0; i < dims; i++) tmp[i] = in[i];
 
     for (int d = dims - 1; d >= 4; d--) {
