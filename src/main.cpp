@@ -63,6 +63,7 @@ static void processInput(GLFWwindow* window, TransformND& t, bool newControls, f
         if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) t.translation[2] += spd;
         if (glfwGetKey(window, GLFW_KEY_R) == GLFW_PRESS) {
             std::fill(t.angles.begin(), t.angles.end(), 0.0f);
+            std::fill(t.modelAngles.begin(), t.modelAngles.end(), 0.0f);
             std::fill(t.translation.begin(), t.translation.end(), 0.0f);
         }
         return;
@@ -104,6 +105,7 @@ static void processInput(GLFWwindow* window, TransformND& t, bool newControls, f
 
     if (glfwGetKey(window, GLFW_KEY_R) == GLFW_PRESS) {
         std::fill(t.angles.begin(), t.angles.end(), 0.0f);
+        std::fill(t.modelAngles.begin(), t.modelAngles.end(), 0.0f);
         std::fill(t.translation.begin(), t.translation.end(), 0.0f);
     }
 }
