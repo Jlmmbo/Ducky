@@ -13,7 +13,7 @@ const float Z_FAR = 20.0;
 
 void main() {
     float zDepth = uDist3D - aPos.z;
-    float perspDiv = zDepth > 0.001 ? zDepth : 0.001;
+    float perspDiv = max(zDepth, 0.1);
 
     float z_eye = aPos.z - uDist3D;
     float clip_z = z_eye * (Z_FAR + Z_NEAR) / (Z_NEAR - Z_FAR) + 2.0 * Z_FAR * Z_NEAR / (Z_NEAR - Z_FAR);

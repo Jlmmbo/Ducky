@@ -3,6 +3,7 @@
 #include <cmath>
 #include <vector>
 #include <cstring>
+#include <algorithm>
 
 #ifdef _WIN32
 #include <malloc.h>
@@ -122,4 +123,12 @@ inline void projectStereographic(const float* in, float* out, int dims, float fo
     out[0] = x * s;
     out[1] = y * s;
     out[2] = z * s;
+    // Clamp output length to prevent extreme coordinates that cause artifacts
+    float outLen = sqrtf(out[0]*out[0] + out[1]*out[1] + out[2]*out[2]);
+    if (outLen > 6.0f) {
+        float scale = 6.0f / outLen;
+        out[0] *= scale;
+        out[1] *= scale;
+        out[2] *= scale;
+    }
 }
