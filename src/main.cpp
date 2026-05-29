@@ -1349,19 +1349,19 @@ int main(int argc, char* argv[]) {
         {
             float infoX = (float)fbW - 260.0f;
             float infoY = 10.0f;
-            float infoH = 280.0f;
+            float infoH = 320.0f;
             drawRect(uiProgram, uiVAO, uiVBO,
                      infoX, infoY, 250.0f, infoH,
                      0.12f, 0.12f, 0.18f, 0.92f, (float)fbW, (float)fbH);
 
             char camStr[128];
             int off = snprintf(camStr, sizeof(camStr), "Camera: (");
-            for (unsigned int d = 0; d < dims && d < 4 && off < (int)sizeof(camStr) - 20; d++)
+            for (unsigned int d = 0; d < dims && d < 3 && off < (int)sizeof(camStr) - 20; d++)
                 off += snprintf(camStr + off, sizeof(camStr) - off,
                                 "%s%.2f", d > 0 ? ", " : "", -transform.translation[d]);
             if (off < (int)sizeof(camStr) - 6)
                 snprintf(camStr + off, sizeof(camStr) - off, "%s)",
-                         dims > 4 ? ", ..." : "");
+                         dims > 3 ? ", ..." : "");
 
             char infoLines[512];
             snprintf(infoLines, sizeof(infoLines),
@@ -1402,7 +1402,7 @@ int main(int argc, char* argv[]) {
             // Draw action buttons
             int btnW = 76, btnH = 24, gap = 4, colGap = 5;
             int btnStartX = (int)infoX + 8;
-            int btnStartY = (int)infoY + 145;
+            int btnStartY = (int)infoY + 180;
             const char* btnLabels[] = {"Reset All", "Wireframe", "Color Scheme",
                                         "Rotation", "Focus -", "Focus +",
                                         "Render Mode",
