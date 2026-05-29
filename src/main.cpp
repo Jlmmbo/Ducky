@@ -1229,7 +1229,7 @@ int main(int argc, char* argv[]) {
                            btnX0 + 5, ry + 2, "-",
                            (float)fbW, (float)fbH, dtIndices.data(), TEXT_MAX_QUADS);
                 // label
-                snprintf(ctrlLabel, sizeof(ctrlLabel), "Move D%d", d);
+                snprintf(ctrlLabel, sizeof(ctrlLabel), "Move Dim %d", d);
                 drawTextAt(dtVAO, dtVBO, dtEBO, textProgram,
                            labelX0, ry, ctrlLabel,
                            (float)fbW, (float)fbH, dtIndices.data(), TEXT_MAX_QUADS);
@@ -1261,7 +1261,7 @@ int main(int argc, char* argv[]) {
                     drawTextAt(dtVAO, dtVBO, dtEBO, textProgram,
                                btnX0 + 5, ry + 2, "-",
                                (float)fbW, (float)fbH, dtIndices.data(), TEXT_MAX_QUADS);
-                    snprintf(ctrlLabel, sizeof(ctrlLabel), "Rot (%d,%d)", a, b);
+                    snprintf(ctrlLabel, sizeof(ctrlLabel), "Rotate (%d,%d)", a, b);
                     drawTextAt(dtVAO, dtVBO, dtEBO, textProgram,
                                labelX0, ry, ctrlLabel,
                                (float)fbW, (float)fbH, dtIndices.data(), TEXT_MAX_QUADS);
@@ -1352,6 +1352,15 @@ int main(int argc, char* argv[]) {
                      infoX, infoY, 250.0f, infoH,
                      0.12f, 0.12f, 0.18f, 0.92f, (float)fbW, (float)fbH);
 
+            char camStr[128];
+            int off = snprintf(camStr, sizeof(camStr), "Camera: (");
+            for (unsigned int d = 0; d < dims && d < 4 && off < (int)sizeof(camStr) - 20; d++)
+                off += snprintf(camStr + off, sizeof(camStr) - off,
+                                "%s%.2f", d > 0 ? ", " : "", -transform.translation[d]);
+            if (off < (int)sizeof(camStr) - 6)
+                snprintf(camStr + off, sizeof(camStr) - off, "%s)",
+                         dims > 4 ? ", ..." : "");
+
             char infoLines[512];
             snprintf(infoLines, sizeof(infoLines),
                       "%uD Model\n"
@@ -1359,18 +1368,20 @@ int main(int argc, char* argv[]) {
                       "Triangles: %u\n"
                       "Edges: %zu\n"
                       "Planes: %d\n"
-                      "Focal: %.1f\n"
-                      "Scheme: %s\n"
+                      "Focal Length: %.1f\n"
+                      "Color Scheme: %s\n"
                       "Wireframe: %s\n"
                       "Lighting: %s\n"
-                      "Mode: %s",
+                      "Mode: %s\n"
+                      "%s",
                       dims, model.vertexCount, model.indexCount / 3,
                       edges.size(), transform.planeCount(),
                       focalLength,
                        colorSchemeNames[colorScheme],
                       wireframeOnly ? "ON" : "OFF",
                       lighting ? "ON" : "OFF",
-                      renderModeNames[renderMode]);
+                      renderModeNames[renderMode],
+                      camStr);
 
             std::string infoStr(infoLines);
             size_t pos = 0;
