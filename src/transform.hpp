@@ -14,6 +14,7 @@ constexpr float PI = 3.141592653589793f;
 
 struct TransformND {
     std::vector<float> angles;
+    std::vector<float> modelAngles;
     std::vector<float> translation;
     std::vector<bool> autoRotate;
     unsigned int dims = 0;
@@ -73,7 +74,7 @@ inline void applyRotation(float* pos, const TransformND& t) {
         for (int j = i + 1; j < (int)t.dims; j++) {
             float angle = t.angles[t.planeIndex(i, j)];
             if (fabsf(angle) > 0.0001f)
-                rotatePlane(pos[i], pos[j], angle);
+                rotatePlane(pos[i], pos[j], -angle);
         }
     }
 }

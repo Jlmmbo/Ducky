@@ -21,6 +21,7 @@
 constexpr int WINDOW_WIDTH = 1920;
 constexpr int WINDOW_HEIGHT = 1920;
 constexpr float ROTATE_SPEED = 0.02f;
+constexpr float MOVE_SPEED = 2.0f;
 constexpr float AXIS_LENGTH = 1.5f;
 
 constexpr float PANEL_WIDTH = 290.0f;
@@ -51,7 +52,22 @@ void main() {
 }
 )";
 
-static void processInput(GLFWwindow* window, TransformND& t) {
+static void processInput(GLFWwindow* window, TransformND& t, bool newControls, float dt) {
+    if (newControls) {
+        float spd = MOVE_SPEED * dt;
+        if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) t.translation[0] -= spd;
+        if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) t.translation[0] += spd;
+        if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS) t.translation[1] -= spd;
+        if (glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS) t.translation[1] += spd;
+        if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) t.translation[2] -= spd;
+        if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) t.translation[2] += spd;
+        if (glfwGetKey(window, GLFW_KEY_R) == GLFW_PRESS) {
+            std::fill(t.angles.begin(), t.angles.end(), 0.0f);
+            std::fill(t.translation.begin(), t.translation.end(), 0.0f);
+        }
+        return;
+    }
+
     int planeKeysPos[] = {
         GLFW_KEY_1, GLFW_KEY_3, GLFW_KEY_5, GLFW_KEY_7,
         GLFW_KEY_9, GLFW_KEY_MINUS
@@ -140,6 +156,7 @@ int main(int argc, char* argv[]) {
     bool transparent = false;
     bool lighting = true;
     float modelAlpha = 0.35f;
+    bool newControls = true;
 
     const char* modelPath = argc > 1 ? argv[1] : "model.dky";
     Model model = LoadModel(modelPath);
@@ -336,6 +353,7 @@ int main(int argc, char* argv[]) {
     TransformND transform;
     transform.dims = dims;
     transform.angles.resize(transform.planeCount(), 0.0f);
+    transform.modelAngles.resize(transform.planeCount(), 0.0f);
     transform.autoRotate.resize(transform.planeCount(), true);
     transform.translation.resize(dims, 0.0f);
 
@@ -345,7 +363,7 @@ int main(int argc, char* argv[]) {
     // UI state
     MouseState mouse = {};
     int dragSlider = -1;
-    int hoverSlider = -1;
+    int hoverSlider = -1; (void)hoverSlider;
     int clickedButton = -1;
 
     enum ButtonId {
@@ -415,6 +433,11 @@ int main(int argc, char* argv[]) {
 
     while (!glfwWindowShouldClose(window)) {
         // ── Input ──
+        // Frame timing for movement/rotation
+        double now = glfwGetTime();
+        float dt = std::min((float)(now - lastTime), 0.05f);
+        lastTime = now;
+
         // Mouse state
         {
             double mx, my;
@@ -434,9 +457,17 @@ int main(int argc, char* argv[]) {
             mouse.y = my;
         }
 
-        processInput(window, transform);
+        processInput(window, transform, newControls, dt);
 
         // ── Keyboard shortcuts ──
+        // Tab toggle between new (WASD/mouse) and original controls
+        {
+            static bool tabPrev = false;
+            bool tabNow = glfwGetKey(window, GLFW_KEY_TAB) == GLFW_PRESS;
+            if (tabNow && !tabPrev) newControls = !newControls;
+            tabPrev = tabNow;
+        }
+
         // Save/Load state
         {
             bool ctrl = glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS ||
@@ -474,8 +505,8 @@ int main(int argc, char* argv[]) {
             f1Prev = f1Now;
         }
 
-        // Wireframe toggle (E key with no modifiers)
-        {
+        // Wireframe toggle (E key with no modifiers, old controls only)
+        if (!newControls) {
             bool ctrl = glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS ||
                         glfwGetKey(window, GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS;
             static bool ePrev = false;
@@ -484,8 +515,8 @@ int main(int argc, char* argv[]) {
             ePrev = eNow;
         }
 
-        // Toggle all autorotate (A)
-        {
+        // Toggle all autorotate (A, old controls only)
+        if (!newControls) {
             static bool aPrev = false;
             bool aNow = glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS;
             if (aNow && !aPrev) {
@@ -537,8 +568,8 @@ int main(int argc, char* argv[]) {
             mPrev = mNow;
         }
 
-        // Auto-rotation preset cycle (V)
-        {
+        // Auto-rotation preset cycle (V, old controls only)
+        if (!newControls) {
             static bool vPrev = false;
             bool vNow = glfwGetKey(window, GLFW_KEY_V) == GLFW_PRESS;
             if (vNow && !vPrev) {
@@ -587,18 +618,21 @@ int main(int argc, char* argv[]) {
         float mx_fb = mouse.x * uiScaleX;
         float my_fb = mouse.y * uiScaleY;
 
-        // Mouse orbit (right-click drag)
+        // Mouse camera rotation (orbit)
         {
-            if (mouse.rightPressed) {
+            bool orbitKey = newControls ? mouse.left : mouse.right;
+            bool orbitPressed = newControls ? mouse.leftPressed : mouse.rightPressed;
+            bool orbitReleased = newControls ? mouse.leftReleased : mouse.rightReleased;
+            if (orbitPressed) {
                 int nSliders = transform.planeCount();
                 float panelH = PAD * 2.0f + 24.0f + (float)nSliders * SLIDER_HEIGHT + 10.0f;
                 bool overSlider = mx_fb >= 10.0f && mx_fb <= 10.0f + PANEL_WIDTH &&
                                   my_fb >= 10.0f && my_fb <= 10.0f + panelH;
-                if (!overSlider && !mouse.left)
+                if (!overSlider && !(newControls ? mouse.right : mouse.left))
                     orbitMode = true;
             }
-            if (mouse.rightReleased) orbitMode = false;
-            if (orbitMode && mouse.right && mouse.moved) {
+            if (orbitReleased) orbitMode = false;
+            if (orbitMode && orbitKey && mouse.moved) {
                 double dx = mouse.x - mouse.lastX;
                 double dy = mouse.y - mouse.lastY;
                 if (dims >= 3) {
@@ -610,19 +644,15 @@ int main(int argc, char* argv[]) {
             }
         }
 
-        // Per-plane auto-rotation with clamped delta, wrapping to [-PI, PI)
+        // Per-plane auto-rotation with wrapping to [-PI, PI) (rotates the model)
         {
-            double now = glfwGetTime();
-            float dt = std::min((float)(now - lastTime), 0.05f);
-            lastTime = now;
-
             for (int i = 0; i < transform.planeCount(); i++) {
                 if (transform.autoRotate[i])
-                    transform.angles[i] += dt * 0.5f * (1 + (i % 3));
-                float a = transform.angles[i];
+                    transform.modelAngles[i] += dt * 0.5f * (1 + (i % 3));
+                float a = transform.modelAngles[i];
                 a = fmodf(a + PI, 2.0f * PI);
                 if (a < 0) a += 2.0f * PI;
-                transform.angles[i] = a - PI;
+                transform.modelAngles[i] = a - PI;
             }
         }
 
@@ -638,8 +668,93 @@ int main(int argc, char* argv[]) {
             memcpy(lastTitle, titleBuf, sizeof(titleBuf));
         }
 
-        // Process slider mouse interaction
-        {
+        constexpr float BTN_SZ = 20.0f;
+        constexpr float LEFT_ROW_H = 24.0f;
+
+        // Process panel mouse interaction
+        if (newControls) {
+            // HD control buttons: movement (dim >= 3) and rotation (planes with a >= 3)
+            int nMoveHD = (int)dims >= 3 ? (int)dims - 3 : 0; (void)nMoveHD;
+            int nRotHD = 0;
+            for (int a = 3; a < (int)dims; a++)
+                for (int b = a + 1; b < (int)dims; b++)
+                    nRotHD++;
+
+            float panelTop = 10.0f;
+            float panelLeft = 10.0f;
+            float titleH = 24.0f;
+            float rowY0 = panelTop + PAD + titleH + PAD;
+            float btnX0 = panelLeft + PAD;
+            float btnX1 = panelLeft + PANEL_WIDTH - PAD - BTN_SZ;
+            float labelX0 = btnX0 + BTN_SZ + PAD; (void)labelX0;
+
+            // held action state: type (0=move,1=rot), idx, dir (-1 or 1)
+            static int heldType = -1, heldIdx = 0, heldDir = 0;
+            static float heldTimer = 0.0f;
+
+            if (mouse.leftPressed) {
+                heldType = -1;
+                int row = 0;
+                // Movement rows
+                for (int d = 3; d < (int)dims; d++, row++) {
+                    float ry = rowY0 + row * LEFT_ROW_H;
+                    if (my_fb >= ry && my_fb <= ry + LEFT_ROW_H) {
+                        if (mx_fb >= btnX0 && mx_fb <= btnX0 + BTN_SZ) {
+                            transform.translation[d] -= 0.1f;
+                            heldType = 0; heldIdx = d; heldDir = -1; heldTimer = 0.0f;
+                            break;
+                        }
+                        if (mx_fb >= btnX1 && mx_fb <= btnX1 + BTN_SZ) {
+                            transform.translation[d] += 0.1f;
+                            heldType = 0; heldIdx = d; heldDir = 1; heldTimer = 0.0f;
+                            break;
+                        }
+                    }
+                }
+                // Section separator (rendered but not interactive)
+                if (nMoveHD > 0 && nRotHD > 0) row++;
+
+                if (heldType < 0) {
+                    // Rotation rows
+                    for (int a = 3; a < (int)dims; a++)
+                        for (int b = a + 1; b < (int)dims; b++, row++) {
+                            float ry = rowY0 + row * LEFT_ROW_H;
+                            if (my_fb >= ry && my_fb <= ry + LEFT_ROW_H) {
+                                int pi = transform.planeIndex(a, b);
+                                if (mx_fb >= btnX0 && mx_fb <= btnX0 + BTN_SZ) {
+                                    transform.angles[pi] -= 0.1f;
+                                    heldType = 1; heldIdx = pi; heldDir = -1; heldTimer = 0.0f;
+                                    goto done_hd;
+                                }
+                                if (mx_fb >= btnX1 && mx_fb <= btnX1 + BTN_SZ) {
+                                    transform.angles[pi] += 0.1f;
+                                    heldType = 1; heldIdx = pi; heldDir = 1; heldTimer = 0.0f;
+                                    goto done_hd;
+                                }
+                            }
+                        }
+                }
+                done_hd:;
+            }
+
+            // Hold-to-repeat
+            if (heldType >= 0 && mouse.left && !mouse.leftPressed) {
+                heldTimer += dt;
+                while (heldTimer >= 0.05f) {
+                    heldTimer -= 0.05f;
+                    if (heldType == 0)
+                        transform.translation[heldIdx] += heldDir * 0.1f;
+                    else
+                        transform.angles[heldIdx] += heldDir * 0.1f;
+                }
+            }
+
+            if (mouse.leftReleased) { heldType = -1; heldTimer = 0.0f; }
+
+            // In new mode, left-click is orbit outside the panel; skip old slider/button logic
+            dragSlider = -1;
+        } else {
+            // Original slider interaction
             int nSliders = transform.planeCount();
             float panelTop = 10.0f;
             float panelLeft = 10.0f;
@@ -670,7 +785,7 @@ int main(int argc, char* argv[]) {
                             dragSlider = i;
                             float t = (float)((mx_fb - trackX) / trackW);
                             t = std::max(0.0f, std::min(1.0f, t));
-                            transform.angles[i] = -PI + t * (2.0f * PI);
+                            transform.modelAngles[i] = -PI + t * (2.0f * PI);
                             break;
                         }
                     }
@@ -680,14 +795,27 @@ int main(int argc, char* argv[]) {
             if (dragSlider >= 0 && mouse.left) {
                 float t = (float)((mx_fb - trackX) / trackW);
                 t = std::max(0.0f, std::min(1.0f, t));
-                transform.angles[dragSlider] = -PI + t * (2.0f * PI);
+                transform.modelAngles[dragSlider] = -PI + t * (2.0f * PI);
             }
 
+            // Hover slider highlight
+            hoverSlider = -1;
+            for (int i = 0; i < nSliders; i++) {
+                float rowY = panelTop + PAD + titleH + PAD + i * SLIDER_HEIGHT;
+                if (mx_fb >= trackX && mx_fb <= trackX + trackW &&
+                    my_fb >= rowY && my_fb <= rowY + SLIDER_HEIGHT)
+                    hoverSlider = i;
+            }
+        }
+
+        // Right-panel buttons (shared between modes)
+        {
             if (mouse.leftReleased) {
                 if (clickedButton >= 0) {
                     switch (clickedButton) {
                         case BTN_RESET:
                             std::fill(transform.angles.begin(), transform.angles.end(), 0.0f);
+                            std::fill(transform.modelAngles.begin(), transform.modelAngles.end(), 0.0f);
                             std::fill(transform.translation.begin(), transform.translation.end(), 0.0f);
                             break;
                         case BTN_WIREFRAME:
@@ -753,14 +881,6 @@ int main(int argc, char* argv[]) {
                     }
                 }
             }
-
-            hoverSlider = -1;
-            for (int i = 0; i < nSliders; i++) {
-                float rowY = panelTop + PAD + titleH + PAD + i * SLIDER_HEIGHT;
-                if (mx_fb >= trackX && mx_fb <= trackX + trackW &&
-                    my_fb >= rowY && my_fb <= rowY + SLIDER_HEIGHT)
-                    hoverSlider = i;
-            }
         }
 
         // Process vertices
@@ -768,6 +888,13 @@ int main(int argc, char* argv[]) {
         for (unsigned int i = 0; i < model.vertexCount; i++) {
             for (unsigned int d = 0; d < dims; d++)
                 pos[d] = model.vertices[i * fpv + d];
+            // Model auto-rotation (non-negated)
+            for (int ii = 0; ii < (int)dims; ii++)
+                for (int jj = ii + 1; jj < (int)dims; jj++) {
+                    float angle = transform.modelAngles[transform.planeIndex(ii, jj)];
+                    if (fabsf(angle) > 0.0001f)
+                        rotatePlane(pos[ii], pos[jj], angle);
+                }
             for (unsigned int d = 0; d < dims; d++)
                 pos[d] += transform.translation[d];
             applyRotation(pos, transform);
@@ -973,7 +1100,6 @@ int main(int argc, char* argv[]) {
                 memset(origin, 0, dims * sizeof(float));
                 memset(tip, 0, dims * sizeof(float));
                 tip[d] = AXIS_LENGTH;
-                applyRotation(origin, transform);
                 applyRotation(tip, transform);
                 switch (renderMode) {
                     case 0: projectPerspective(origin, &axis3D[d * 12], dims, focalLength); break;
@@ -1055,83 +1181,167 @@ int main(int argc, char* argv[]) {
         // === UI overlay ===
         glDisable(GL_DEPTH_TEST);
 
-        int nSliders = transform.planeCount();
         float panelTop = 10.0f;
         float panelLeft = 10.0f;
         float titleH = 24.0f;
-        float panelH = PAD * 2 + titleH + nSliders * SLIDER_HEIGHT + 10.0f;
 
-        // Slider panel background
-        drawRect(uiProgram, uiVAO, uiVBO,
-                 panelLeft, panelTop, PANEL_WIDTH, panelH,
-                 0.12f, 0.12f, 0.18f, 0.92f, (float)fbW, (float)fbH);
-
-        // Border
-        drawRect(uiProgram, uiVAO, uiVBO,
-                 panelLeft, panelTop, PANEL_WIDTH, 1.0f,
-                 0.3f, 0.3f, 0.5f, 0.8f, (float)fbW, (float)fbH);
-        drawRect(uiProgram, uiVAO, uiVBO,
-                 panelLeft, panelTop + panelH - 1, PANEL_WIDTH, 1.0f,
-                 0.3f, 0.3f, 0.5f, 0.8f, (float)fbW, (float)fbH);
-
-        // Title
-        char titleStr[64];
-        snprintf(titleStr, sizeof(titleStr), "%uD Rotations", dims);
-
-        float toggleX = panelLeft + PAD;
-        float labelX = toggleX + TOGGLE_SIZE + PAD;
-        float trackX = labelX + LABEL_WIDTH + PAD;
-        float trackW = PANEL_WIDTH - (trackX - panelLeft) - VALUE_WIDTH - PAD;
-
-        // Draw each slider
-        char label[16];
-        char valueStr[16];
-        for (int i = 0; i < nSliders; i++) {
-            float rowY = panelTop + PAD + titleH + PAD + i * SLIDER_HEIGHT;
-
-            bool autoOn = transform.autoRotate[i];
-            drawRect(uiProgram, uiVAO, uiVBO,
-                     toggleX, rowY + (SLIDER_HEIGHT - TOGGLE_SIZE) / 2,
-                     TOGGLE_SIZE, TOGGLE_SIZE,
-                     autoOn ? 0.2f : 0.15f, autoOn ? 0.7f : 0.15f, autoOn ? 0.2f : 0.2f, 0.9f,
-                     (float)fbW, (float)fbH);
-            float tglY = rowY + (SLIDER_HEIGHT - TOGGLE_SIZE) / 2;
-            char toggleLabel[2] = {autoOn ? 'A' : 'M', '\0'};
-            drawTextAt(dtVAO, dtVBO, dtEBO, textProgram,
-                       toggleX + 4, tglY + 3, toggleLabel,
-                       (float)fbW, (float)fbH, dtIndices.data(), TEXT_MAX_QUADS);
-
-            int pi = 0;
-            int ai = -1, aj = -1;
-            for (int a = 0; a < (int)dims && pi <= i; a++)
-                for (int b = a + 1; b < (int)dims && pi <= i; b++, pi++)
-                    if (pi == i) { ai = a; aj = b; }
-            snprintf(label, sizeof(label), "(%d,%d)", ai, aj);
+        if (newControls) {
+            // Compute rows
+            int nMoveHD = (int)dims >= 3 ? (int)dims - 3 : 0;
+            int nRotHD = 0;
+            for (int a = 3; a < (int)dims; a++)
+                for (int b = a + 1; b < (int)dims; b++)
+                    nRotHD++;
+            int nRows = nMoveHD + nRotHD;
+            if (nMoveHD > 0 && nRotHD > 0) nRows++; // section gap
+            float panelH = PAD * 2 + titleH + nRows * LEFT_ROW_H + 10.0f;
 
             drawRect(uiProgram, uiVAO, uiVBO,
-                     trackX, rowY, trackW, SLIDER_HEIGHT,
-                     0.2f, 0.2f, 0.3f, 0.9f, (float)fbW, (float)fbH);
-
-            float val = transform.angles[i];
-            float fillFrac = (val + PI) / (2.0f * PI);
-            fillFrac = std::max(0.0f, std::min(1.0f, fillFrac));
+                     panelLeft, panelTop, PANEL_WIDTH, panelH,
+                     0.12f, 0.12f, 0.18f, 0.92f, (float)fbW, (float)fbH);
             drawRect(uiProgram, uiVAO, uiVBO,
-                     trackX, rowY, trackW * fillFrac, SLIDER_HEIGHT,
-                     0.35f, 0.5f, 0.9f, 0.8f, (float)fbW, (float)fbH);
+                     panelLeft, panelTop, PANEL_WIDTH, 1.0f,
+                     0.3f, 0.3f, 0.5f, 0.8f, (float)fbW, (float)fbH);
+            drawRect(uiProgram, uiVAO, uiVBO,
+                     panelLeft, panelTop + panelH - 1, PANEL_WIDTH, 1.0f,
+                     0.3f, 0.3f, 0.5f, 0.8f, (float)fbW, (float)fbH);
 
-            snprintf(valueStr, sizeof(valueStr), "%.2f", val);
             drawTextAt(dtVAO, dtVBO, dtEBO, textProgram,
-                       trackX + trackW + PAD, rowY, valueStr,
+                       panelLeft + PAD, panelTop + PAD, "HD Controls",
                        (float)fbW, (float)fbH, dtIndices.data(), TEXT_MAX_QUADS);
+
+            int row = 0;
+            float rowY0 = panelTop + PAD + titleH + PAD;
+            float btnX0 = panelLeft + PAD;
+            float btnX1 = panelLeft + PANEL_WIDTH - PAD - BTN_SZ;
+            float labelX0 = btnX0 + BTN_SZ + PAD;
+
+            char ctrlLabel[32];
+
+            // Movement rows (dim >= 3)
+            for (int d = 3; d < (int)dims; d++, row++) {
+                float ry = rowY0 + row * LEFT_ROW_H;
+                // [-] button
+                drawRect(uiProgram, uiVAO, uiVBO,
+                         btnX0, ry + (LEFT_ROW_H - BTN_SZ) / 2, BTN_SZ, BTN_SZ,
+                         0.35f, 0.2f, 0.2f, 0.9f, (float)fbW, (float)fbH);
+                drawTextAt(dtVAO, dtVBO, dtEBO, textProgram,
+                           btnX0 + 5, ry + 2, "-",
+                           (float)fbW, (float)fbH, dtIndices.data(), TEXT_MAX_QUADS);
+                // label
+                snprintf(ctrlLabel, sizeof(ctrlLabel), "Move D%d", d);
+                drawTextAt(dtVAO, dtVBO, dtEBO, textProgram,
+                           labelX0, ry, ctrlLabel,
+                           (float)fbW, (float)fbH, dtIndices.data(), TEXT_MAX_QUADS);
+                // [+] button
+                drawRect(uiProgram, uiVAO, uiVBO,
+                         btnX1, ry + (LEFT_ROW_H - BTN_SZ) / 2, BTN_SZ, BTN_SZ,
+                         0.2f, 0.35f, 0.2f, 0.9f, (float)fbW, (float)fbH);
+                drawTextAt(dtVAO, dtVBO, dtEBO, textProgram,
+                           btnX1 + 5, ry + 2, "+",
+                           (float)fbW, (float)fbH, dtIndices.data(), TEXT_MAX_QUADS);
+            }
+
+            // Section separator label
+            if (nMoveHD > 0 && nRotHD > 0) {
+                float ry = rowY0 + row * LEFT_ROW_H;
+                drawTextAt(dtVAO, dtVBO, dtEBO, textProgram,
+                           labelX0, ry, "---",
+                           (float)fbW, (float)fbH, dtIndices.data(), TEXT_MAX_QUADS);
+                row++;
+            }
+
+            // Rotation rows (planes with a >= 3)
+            for (int a = 3; a < (int)dims; a++)
+                for (int b = a + 1; b < (int)dims; b++, row++) {
+                    float ry = rowY0 + row * LEFT_ROW_H;
+                    drawRect(uiProgram, uiVAO, uiVBO,
+                             btnX0, ry + (LEFT_ROW_H - BTN_SZ) / 2, BTN_SZ, BTN_SZ,
+                             0.35f, 0.2f, 0.2f, 0.9f, (float)fbW, (float)fbH);
+                    drawTextAt(dtVAO, dtVBO, dtEBO, textProgram,
+                               btnX0 + 5, ry + 2, "-",
+                               (float)fbW, (float)fbH, dtIndices.data(), TEXT_MAX_QUADS);
+                    snprintf(ctrlLabel, sizeof(ctrlLabel), "Rot (%d,%d)", a, b);
+                    drawTextAt(dtVAO, dtVBO, dtEBO, textProgram,
+                               labelX0, ry, ctrlLabel,
+                               (float)fbW, (float)fbH, dtIndices.data(), TEXT_MAX_QUADS);
+                    drawRect(uiProgram, uiVAO, uiVBO,
+                             btnX1, ry + (LEFT_ROW_H - BTN_SZ) / 2, BTN_SZ, BTN_SZ,
+                             0.2f, 0.35f, 0.2f, 0.9f, (float)fbW, (float)fbH);
+                    drawTextAt(dtVAO, dtVBO, dtEBO, textProgram,
+                               btnX1 + 5, ry + 2, "+",
+                               (float)fbW, (float)fbH, dtIndices.data(), TEXT_MAX_QUADS);
+                }
+        } else {
+            int nSliders = transform.planeCount();
+            float panelH = PAD * 2 + titleH + nSliders * SLIDER_HEIGHT + 10.0f;
+
+            drawRect(uiProgram, uiVAO, uiVBO,
+                     panelLeft, panelTop, PANEL_WIDTH, panelH,
+                     0.12f, 0.12f, 0.18f, 0.92f, (float)fbW, (float)fbH);
+            drawRect(uiProgram, uiVAO, uiVBO,
+                     panelLeft, panelTop, PANEL_WIDTH, 1.0f,
+                     0.3f, 0.3f, 0.5f, 0.8f, (float)fbW, (float)fbH);
+            drawRect(uiProgram, uiVAO, uiVBO,
+                     panelLeft, panelTop + panelH - 1, PANEL_WIDTH, 1.0f,
+                     0.3f, 0.3f, 0.5f, 0.8f, (float)fbW, (float)fbH);
+
+            char titleStr[64];
+            snprintf(titleStr, sizeof(titleStr), "%uD Rotations", dims);
+
             drawTextAt(dtVAO, dtVBO, dtEBO, textProgram,
-                       labelX, rowY, label,
+                       panelLeft + PAD, panelTop + PAD, titleStr,
                        (float)fbW, (float)fbH, dtIndices.data(), TEXT_MAX_QUADS);
+
+            float toggleX = panelLeft + PAD;
+            float labelX = toggleX + TOGGLE_SIZE + PAD;
+            float trackX = labelX + LABEL_WIDTH + PAD;
+            float trackW = PANEL_WIDTH - (trackX - panelLeft) - VALUE_WIDTH - PAD;
+
+            char label[16];
+            char valueStr[16];
+            for (int i = 0; i < nSliders; i++) {
+                float rowY = panelTop + PAD + titleH + PAD + i * SLIDER_HEIGHT;
+
+                bool autoOn = transform.autoRotate[i];
+                drawRect(uiProgram, uiVAO, uiVBO,
+                         toggleX, rowY + (SLIDER_HEIGHT - TOGGLE_SIZE) / 2,
+                         TOGGLE_SIZE, TOGGLE_SIZE,
+                         autoOn ? 0.2f : 0.15f, autoOn ? 0.7f : 0.15f, autoOn ? 0.2f : 0.2f, 0.9f,
+                         (float)fbW, (float)fbH);
+                float tglY = rowY + (SLIDER_HEIGHT - TOGGLE_SIZE) / 2;
+                char toggleLabel[2] = {autoOn ? 'A' : 'M', '\0'};
+                drawTextAt(dtVAO, dtVBO, dtEBO, textProgram,
+                           toggleX + 4, tglY + 3, toggleLabel,
+                           (float)fbW, (float)fbH, dtIndices.data(), TEXT_MAX_QUADS);
+
+                int pi = 0;
+                int ai = -1, aj = -1;
+                for (int a = 0; a < (int)dims && pi <= i; a++)
+                    for (int b = a + 1; b < (int)dims && pi <= i; b++, pi++)
+                        if (pi == i) { ai = a; aj = b; }
+                snprintf(label, sizeof(label), "(%d,%d)", ai, aj);
+
+                drawRect(uiProgram, uiVAO, uiVBO,
+                         trackX, rowY, trackW, SLIDER_HEIGHT,
+                         0.2f, 0.2f, 0.3f, 0.9f, (float)fbW, (float)fbH);
+
+                float val = transform.modelAngles[i];
+                float fillFrac = (val + PI) / (2.0f * PI);
+                fillFrac = std::max(0.0f, std::min(1.0f, fillFrac));
+                drawRect(uiProgram, uiVAO, uiVBO,
+                         trackX, rowY, trackW * fillFrac, SLIDER_HEIGHT,
+                         0.35f, 0.5f, 0.9f, 0.8f, (float)fbW, (float)fbH);
+
+                snprintf(valueStr, sizeof(valueStr), "%.2f", val);
+                drawTextAt(dtVAO, dtVBO, dtEBO, textProgram,
+                           trackX + trackW + PAD, rowY, valueStr,
+                           (float)fbW, (float)fbH, dtIndices.data(), TEXT_MAX_QUADS);
+                drawTextAt(dtVAO, dtVBO, dtEBO, textProgram,
+                           labelX, rowY, label,
+                           (float)fbW, (float)fbH, dtIndices.data(), TEXT_MAX_QUADS);
+            }
         }
-
-        // Draw title
-        drawTextAt(dtVAO, dtVBO, dtEBO, textProgram,
-                   panelLeft + PAD, panelTop + PAD, titleStr,
-                   (float)fbW, (float)fbH, dtIndices.data(), TEXT_MAX_QUADS);
 
         // Model info + buttons panel (right side)
         {
