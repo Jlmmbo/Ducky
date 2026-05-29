@@ -84,7 +84,7 @@ inline void projectPerspective(const float* in, float* out, int dims, float foca
     for (int i = 0; i < dims; i++) tmp[i] = in[i];
 
     for (int d = dims - 1; d >= 3; d--) {
-        float dist = (float)d * focalLength;
+        float dist = focalLength * 3.0f;
         float depth = dist - tmp[d];
         float scale = depth > 0.001f ? dist / depth : 10.0f;
         for (int c = 0; c < d; c++)
@@ -107,7 +107,7 @@ inline void projectStereographic(const float* in, float* out, int dims, float fo
     for (int i = 0; i < dims; i++) tmp[i] = in[i];
 
     for (int d = dims - 1; d >= 4; d--) {
-        float dist = (float)d * focalLength;
+        float dist = focalLength * 3.0f;
         float depth = dist - tmp[d];
         float s = depth > 0.001f ? dist / depth : 10.0f;
         for (int c = 0; c < d; c++)

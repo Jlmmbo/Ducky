@@ -59,12 +59,13 @@ static void processInput(GLFWwindow* window, TransformND& t, bool newControls, f
         if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) t.translation[0] += spd;
         if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS) t.translation[1] -= spd;
         if (glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS) t.translation[1] += spd;
-        if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) t.translation[2] -= spd;
-        if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) t.translation[2] += spd;
+        if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) t.translation[2] += spd;
+        if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) t.translation[2] -= spd;
         if (glfwGetKey(window, GLFW_KEY_R) == GLFW_PRESS) {
             std::fill(t.angles.begin(), t.angles.end(), 0.0f);
             std::fill(t.modelAngles.begin(), t.modelAngles.end(), 0.0f);
             std::fill(t.translation.begin(), t.translation.end(), 0.0f);
+            if (t.dims > 2) t.translation[2] = -2.0f;
         }
         return;
     }
@@ -107,6 +108,7 @@ static void processInput(GLFWwindow* window, TransformND& t, bool newControls, f
         std::fill(t.angles.begin(), t.angles.end(), 0.0f);
         std::fill(t.modelAngles.begin(), t.modelAngles.end(), 0.0f);
         std::fill(t.translation.begin(), t.translation.end(), 0.0f);
+        if (t.dims > 2) t.translation[2] = -2.0f;
     }
 }
 
@@ -358,6 +360,7 @@ int main(int argc, char* argv[]) {
     transform.modelAngles.resize(transform.planeCount(), 0.0f);
     transform.autoRotate.resize(transform.planeCount(), true);
     transform.translation.resize(dims, 0.0f);
+    if (dims > 2) transform.translation[2] = -2.0f; // camera at +Z looking toward origin
 
     std::vector<float> projectedVerts(model.vertexCount * 6);
     std::vector<float> rotatedND(model.vertexCount * dims);
@@ -1099,9 +1102,11 @@ int main(int argc, char* argv[]) {
             float* origin = (float*)alloca(dims * sizeof(float));
             float* tip = (float*)alloca(dims * sizeof(float));
             for (unsigned int d = 0; d < dims; d++) {
-                memset(origin, 0, dims * sizeof(float));
-                memset(tip, 0, dims * sizeof(float));
-                tip[d] = AXIS_LENGTH;
+                for (unsigned int i = 0; i < dims; i++) {
+                    origin[i] = transform.translation[i];
+                    tip[i] = (i == d ? AXIS_LENGTH : 0.0f) + transform.translation[i];
+                }
+                applyRotation(origin, transform);
                 applyRotation(tip, transform);
                 switch (renderMode) {
                     case 0: projectPerspective(origin, &axis3D[d * 12], dims, focalLength); break;
