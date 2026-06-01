@@ -125,10 +125,10 @@ inline void drawRect(GLuint program, GLuint vao, GLuint vbo,
     glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
 }
 
-inline int drawTextAt(GLuint vao, GLuint vbo, GLuint ebo, GLuint program,
+inline int drawTextAt(GLuint vao, GLuint vbo, GLuint /*ebo*/, GLuint program,
                       float x, float y, const char* text,
                       float screenW, float screenH,
-                      const unsigned int* indices, int maxQuads) {
+                      const unsigned int* /*indices*/, int maxQuads) {
     std::vector<char> buf(131072);
     int nq = stb_easy_font_print(x, y, (char*)text, nullptr, buf.data(), (int)buf.size());
     if (nq <= 0 || nq > maxQuads) return 0;

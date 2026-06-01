@@ -96,7 +96,7 @@ static int stb_easy_font_draw_segs(float x, float y, unsigned char *segs, int nu
 }
 
 static float stb_easy_font_spacing_val = 0;
-static void stb_easy_font_spacing(float spacing)
+static void __attribute__((unused)) stb_easy_font_spacing(float spacing)
 {
    stb_easy_font_spacing_val = spacing;
 }
@@ -132,7 +132,7 @@ static int stb_easy_font_print(float x, float y, char *text, unsigned char color
     return (unsigned) offset/64;
 }
 
-static int stb_easy_font_width(char *text)
+static int __attribute__((unused)) stb_easy_font_width(char *text)
 {
     float len = 0;
     float max_len = 0;
@@ -150,7 +150,7 @@ static int stb_easy_font_width(char *text)
     return (int) ceil(max_len);
 }
 
-static int stb_easy_font_height(char *text)
+static int __attribute__((unused)) stb_easy_font_height(char *text)
 {
     float y = 0;
     int nonempty_line=0;

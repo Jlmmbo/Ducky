@@ -321,11 +321,37 @@ int main(int argc, char* argv[]) {
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, dtEBO);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, dtIndices.size() * sizeof(unsigned int), dtIndices.data(), GL_STATIC_DRAW);
 
+    // Separate VAO/VBO/EBO for perf overlay and hint text (isolated from panel text)
+    const int HUD_MAX_QUADS = 1024;
+    GLuint hudVAO, hudVBO, hudEBO;
+    glGenVertexArrays(1, &hudVAO);
+    glGenBuffers(1, &hudVBO);
+    glGenBuffers(1, &hudEBO);
+    glBindVertexArray(hudVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, hudVBO);
+    glBufferData(GL_ARRAY_BUFFER, HUD_MAX_QUADS * 64, nullptr, GL_DYNAMIC_DRAW);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 16, nullptr);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(1, 4, GL_UNSIGNED_BYTE, GL_TRUE, 16, (void*)12);
+    glEnableVertexAttribArray(1);
+    std::vector<unsigned int> hudIndices(HUD_MAX_QUADS * 6);
+    for (int i = 0; i < HUD_MAX_QUADS; i++) {
+        int base = i * 4;
+        hudIndices[i * 6 + 0] = base;
+        hudIndices[i * 6 + 1] = base + 1;
+        hudIndices[i * 6 + 2] = base + 2;
+        hudIndices[i * 6 + 3] = base + 1;
+        hudIndices[i * 6 + 4] = base + 3;
+        hudIndices[i * 6 + 5] = base + 2;
+    }
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, hudEBO);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, hudIndices.size() * sizeof(unsigned int), hudIndices.data(), GL_STATIC_DRAW);
+
     GLuint textProgram = createShaderProgram("shaders/text.vert", "shaders/text.frag");
     if (!textProgram) { glfwTerminate(); return -1; }
 
     char hintText[256];
-    snprintf(hintText, sizeof(hintText), "%uD  |  Rot:1-0,-=  |  E=wireframe V=preset C=color A=autorotate T=transparency L=lighting []=focal M=render R=reset  |  F11=FS F12=shot F1=perf  |  Right panel has all controls", dims);
+    snprintf(hintText, sizeof(hintText), "%uD  |  E=wireframe V=preset C=color A=autorotate T=transparency L=lighting []=focal M=render R=reset  |  F11=FS F12=shot F1=perf  |  Right panel has all controls", dims);
 
     TransformND transform;
     transform.dims = dims;
@@ -1290,7 +1316,7 @@ int main(int argc, char* argv[]) {
             float trackX = labelX + LABEL_WIDTH + PAD;
             float trackW = PANEL_WIDTH - (trackX - panelLeft) - VALUE_WIDTH - PAD;
 
-            char label[16];
+            char label[32];
             char valueStr[16];
             for (int i = 0; i < nSliders; i++) {
                 float rowY = panelTop + PAD + titleH + PAD + i * SLIDER_HEIGHT;
@@ -1428,15 +1454,15 @@ int main(int argc, char* argv[]) {
             char perfStr[128];
             snprintf(perfStr, sizeof(perfStr), "FPS: %.1f  Verts: %u  Tris: %u",
                      perfFps, model.vertexCount, model.indexCount / 3);
-            drawTextAt(dtVAO, dtVBO, dtEBO, textProgram,
+            drawTextAt(hudVAO, hudVBO, hudEBO, textProgram,
                        PANEL_WIDTH + 20.0f, 30.0f, perfStr,
-                       (float)fbW, (float)fbH, dtIndices.data(), TEXT_MAX_QUADS);
+                       (float)fbW, (float)fbH, hudIndices.data(), HUD_MAX_QUADS);
         }
 
         // HUD text hint
-        drawTextAt(dtVAO, dtVBO, dtEBO, textProgram,
+        drawTextAt(hudVAO, hudVBO, hudEBO, textProgram,
                    PANEL_WIDTH + 20.0f, (float)fbH - 20.0f, hintText,
-                   (float)fbW, (float)fbH, dtIndices.data(), TEXT_MAX_QUADS);
+                   (float)fbW, (float)fbH, hudIndices.data(), HUD_MAX_QUADS);
 
         glEnable(GL_DEPTH_TEST);
 
@@ -1459,6 +1485,9 @@ int main(int argc, char* argv[]) {
     glDeleteVertexArrays(1, &dtVAO);
     glDeleteBuffers(1, &dtVBO);
     glDeleteBuffers(1, &dtEBO);
+    glDeleteVertexArrays(1, &hudVAO);
+    glDeleteBuffers(1, &hudVBO);
+    glDeleteBuffers(1, &hudEBO);
     glDeleteVertexArrays(1, &uiVAO);
     glDeleteBuffers(1, &uiVBO);
     glDeleteProgram(tessProgram);
