@@ -295,7 +295,7 @@ int main(int argc, char* argv[]) {
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), nullptr);
     glEnableVertexAttribArray(0);
 
-    const int TEXT_MAX_QUADS = 512;
+    const int TEXT_MAX_QUADS = 2048;
     GLuint dtVAO, dtVBO, dtEBO;
     glGenVertexArrays(1, &dtVAO);
     glGenBuffers(1, &dtVBO);
@@ -326,33 +326,6 @@ int main(int argc, char* argv[]) {
 
     char hintText[256];
     snprintf(hintText, sizeof(hintText), "%uD  |  Rot:1-0,-=  |  E=wireframe V=preset C=color A=autorotate T=transparency L=lighting []=focal M=render R=reset  |  F11=FS F12=shot F1=perf  |  Right panel has all controls", dims);
-
-    GLuint textVAO, textVBO, textEBO;
-    glGenVertexArrays(1, &textVAO);
-    glGenBuffers(1, &textVBO);
-    glGenBuffers(1, &textEBO);
-    glBindVertexArray(textVAO);
-    glBindBuffer(GL_ARRAY_BUFFER, textVBO);
-    glBufferData(GL_ARRAY_BUFFER, 20000, nullptr, GL_DYNAMIC_DRAW);
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 16, nullptr);
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(1, 4, GL_UNSIGNED_BYTE, GL_TRUE, 16, (void*)12);
-    glEnableVertexAttribArray(1);
-
-    std::vector<unsigned int> hudIndices(2000 * 6);
-    for (int i = 0; i < 2000; i++) {
-        int base = i * 4;
-        hudIndices[i * 6 + 0] = base;
-        hudIndices[i * 6 + 1] = base + 1;
-        hudIndices[i * 6 + 2] = base + 2;
-        hudIndices[i * 6 + 3] = base + 1;
-        hudIndices[i * 6 + 4] = base + 3;
-        hudIndices[i * 6 + 5] = base + 2;
-    }
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, textEBO);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, hudIndices.size() * sizeof(unsigned int), hudIndices.data(), GL_STATIC_DRAW);
-
-    GLint textScreenSize = glGetUniformLocation(textProgram, "uScreenSize");
 
     TransformND transform;
     transform.dims = dims;
@@ -396,9 +369,6 @@ int main(int argc, char* argv[]) {
     float perfFps = 0.0f;
 
     double lastTime = glfwGetTime();
-
-    // Reusable HUD text buffer
-    std::vector<char> textBuffer(20000);
 
     auto takeScreenshot = [&]() {
         glfwGetFramebufferSize(window, &fbW, &fbH);
@@ -666,7 +636,7 @@ int main(int argc, char* argv[]) {
 
         // Only update title when data changes
         static char lastTitle[128] = {};
-        snprintf(titleBuf, sizeof(titleBuf), "Ducky - %uD (%u verts, %zu edges) [F1=perf]",
+        snprintf(titleBuf, sizeof(titleBuf), "Ducky - %uD (%u verts, %zu edges)",
                  dims, model.vertexCount, edges.size());
         if (strcmp(titleBuf, lastTitle) != 0) {
             glfwSetWindowTitle(window, titleBuf);
@@ -1134,6 +1104,8 @@ int main(int argc, char* argv[]) {
         // Draw wireframe edges
         {
             size_t vertCount = 0;
+            std::vector<size_t> edgeOffsets;
+            edgeOffsets.reserve(edges.size());
             if (renderMode == 1) {
                 float* posA = (float*)alloca(dims * sizeof(float));
                 float* posB = (float*)alloca(dims * sizeof(float));
@@ -1144,6 +1116,22 @@ int main(int argc, char* argv[]) {
                         posA[d] = rotatedND[ia * dims + d];
                         posB[d] = rotatedND[ib * dims + d];
                     }
+                    // Skip edges whose midpoint is off-screen after stereographic + 3D camera projection
+                    {
+                        float* midP = (float*)alloca(dims * sizeof(float));
+                        for (unsigned int d = 0; d < dims; d++)
+                            midP[d] = (posA[d] + posB[d]) * 0.5f;
+                        float checkOut[3];
+                        projectStereographic(midP, checkOut, dims, focalLength);
+                        float uDist = 3.0f * focalLength;
+                        float zDepth = uDist - checkOut[2];
+                        float perspDiv = zDepth > 0.1f ? zDepth : 0.1f;
+                        float ndc_x = checkOut[0] * uDist / aspect / perspDiv;
+                        float ndc_y = checkOut[1] * uDist / perspDiv;
+                        if (ndc_x > 1.0f || ndc_x < -1.0f || ndc_y > 1.0f || ndc_y < -1.0f)
+                            continue;
+                    }
+                    edgeOffsets.push_back(vertCount);
                     for (int s = 0; s <= EDGE_SUBDIV; s++) {
                         float t = (float)s / (float)EDGE_SUBDIV;
                         for (unsigned int d = 0; d < dims; d++)
@@ -1174,11 +1162,8 @@ int main(int argc, char* argv[]) {
             glUniform1f(edgeUDist3D, 3.0f * focalLength);
             glBindVertexArray(edgeVAO);
             if (renderMode == 1) {
-                size_t offset = 0;
-                for (size_t i = 0; i < edges.size(); i++) {
+                for (auto offset : edgeOffsets)
                     glDrawArrays(GL_LINE_STRIP, (GLint)offset, EDGE_SUBDIV + 1);
-                    offset += EDGE_SUBDIV + 1;
-                }
             } else {
                 glDrawArrays(GL_LINES, 0, (GLsizei)vertCount);
             }
@@ -1444,21 +1429,14 @@ int main(int argc, char* argv[]) {
             snprintf(perfStr, sizeof(perfStr), "FPS: %.1f  Verts: %u  Tris: %u",
                      perfFps, model.vertexCount, model.indexCount / 3);
             drawTextAt(dtVAO, dtVBO, dtEBO, textProgram,
-                       (float)fbW - 250.0f, (float)fbH - 30.0f, perfStr,
+                       PANEL_WIDTH + 20.0f, 30.0f, perfStr,
                        (float)fbW, (float)fbH, dtIndices.data(), TEXT_MAX_QUADS);
         }
 
         // HUD text hint
-        {
-            int hudNumQuads = stb_easy_font_print(PANEL_WIDTH + 20, 12, hintText,
-                                                  nullptr, textBuffer.data(), (int)textBuffer.size());
-            glUseProgram(textProgram);
-            glUniform2f(textScreenSize, (float)fbW, (float)fbH);
-            glBindBuffer(GL_ARRAY_BUFFER, textVBO);
-            glBufferSubData(GL_ARRAY_BUFFER, 0, hudNumQuads * 64, textBuffer.data());
-            glBindVertexArray(textVAO);
-            glDrawElements(GL_TRIANGLES, hudNumQuads * 6, GL_UNSIGNED_INT, nullptr);
-        }
+        drawTextAt(dtVAO, dtVBO, dtEBO, textProgram,
+                   PANEL_WIDTH + 20.0f, (float)fbH - 20.0f, hintText,
+                   (float)fbW, (float)fbH, dtIndices.data(), TEXT_MAX_QUADS);
 
         glEnable(GL_DEPTH_TEST);
 
@@ -1478,9 +1456,6 @@ int main(int argc, char* argv[]) {
     glDeleteVertexArrays(1, &edgeVAO);
     glDeleteBuffers(1, &edgeVBO);
     glDeleteProgram(edgeProgram);
-    glDeleteVertexArrays(1, &textVAO);
-    glDeleteBuffers(1, &textVBO);
-    glDeleteBuffers(1, &textEBO);
     glDeleteVertexArrays(1, &dtVAO);
     glDeleteBuffers(1, &dtVBO);
     glDeleteBuffers(1, &dtEBO);
