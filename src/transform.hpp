@@ -105,7 +105,8 @@ inline void projectOrthographic(const float* in, float* out, int dims) {
 
 inline void projectStereographic(const float* in, float* out, int dims, float focalLength) {
     int ndim = dims < 4 ? 4 : dims;
-    float* tmp = (float*)alloca(ndim * sizeof(float));
+    float tmpBuf[16];
+    float* tmp = ndim <= 16 ? tmpBuf : (float*)alloca(ndim * sizeof(float));
     for (int i = 0; i < dims; i++) tmp[i] = in[i];
     for (int i = dims; i < ndim; i++) tmp[i] = 0.0f;
 
@@ -125,12 +126,4 @@ inline void projectStereographic(const float* in, float* out, int dims, float fo
     out[0] = x * s;
     out[1] = y * s;
     out[2] = z * s;
-    // Clamp output length to prevent extreme coordinates that cause artifacts
-    float outLen = sqrtf(out[0]*out[0] + out[1]*out[1] + out[2]*out[2]);
-    if (outLen > 6.0f) {
-        float scale = 6.0f / outLen;
-        out[0] *= scale;
-        out[1] *= scale;
-        out[2] *= scale;
-    }
 }

@@ -143,6 +143,7 @@ int main(int argc, char* argv[]) {
     glfwSwapInterval(1);
     int fbW = 0, fbH = 0, winW = 0, winH = 0;
     glEnable(GL_DEPTH_TEST);
+    glDisable(GL_DITHER);
 
     // === State variables ===
     bool showPerformance = false;
@@ -211,6 +212,8 @@ int main(int argc, char* argv[]) {
     GLuint tessUDist3D = glGetUniformLocation(tessProgram, "uDist3D");
     GLuint tessUAlpha = glGetUniformLocation(tessProgram, "uAlpha");
     GLuint tessULighting = glGetUniformLocation(tessProgram, "uLighting");
+    GLuint tessUNear = glGetUniformLocation(tessProgram, "uNear");
+    GLuint tessUFar = glGetUniformLocation(tessProgram, "uFar");
 
     // === Axes setup ===
     GLuint axesVAO, axesVBO;
@@ -931,6 +934,8 @@ int main(int argc, char* argv[]) {
                 float* tposC = (float*)alloca(dims * sizeof(float));
                 float* interp = (float*)alloca(dims * sizeof(float));
 
+                float outMinZ = INFINITY, outMaxZ = -INFINITY;
+
                 for (unsigned int t = 0; t < numTri; t++) {
                     int ia = model.indices[t * 3];
                     int ib = model.indices[t * 3 + 1];
@@ -966,6 +971,10 @@ int main(int argc, char* argv[]) {
                             for (unsigned int d = 0; d < dims; d++)
                                 interp[d] = tposA[d] * w + tposB[d] * u + tposC[d] * v;
                             projectStereographic(interp, &subVerts[vidx * 6], dims, focalLength);
+
+                            float zz = subVerts[vidx * 6 + 2];
+                            if (zz < outMinZ) outMinZ = zz;
+                            if (zz > outMaxZ) outMaxZ = zz;
 
                             subVerts[vidx * 6 + 3] = rA * w + rB * u + rC * v;
                             subVerts[vidx * 6 + 4] = gA * w + gB * u + gC * v;
@@ -1005,6 +1014,8 @@ int main(int argc, char* argv[]) {
                     }
                 }
 
+                for (auto& td : subDepths)
+                    if (!std::isfinite(td.depth)) td.depth = 0.0f;
                 std::sort(subDepths.begin(), subDepths.end(),
                           [](auto& a, auto& b) { return a.depth > b.depth; });
 
@@ -1033,10 +1044,24 @@ int main(int argc, char* argv[]) {
                     glUseProgram(tessProgram);
                     glUniform1f(tessUAspect, aspect);
                     glUniform1f(tessUDist3D, 3.0f * focalLength);
+                    {
+                        float uDist = 3.0f * focalLength;
+                        float near = uDist - outMaxZ;
+                        if (near < 0.01f) near = 0.01f;
+                        float far = uDist - outMinZ;
+                        if (far < near + 0.01f) far = near + 0.01f;
+                        float maxFar = std::max(near * 100.0f, 20.0f);
+                        if (far > maxFar) far = maxFar;
+                        glUniform1f(tessUNear, near);
+                        glUniform1f(tessUFar, far);
+                    }
                     glUniform1f(tessUAlpha, transparent ? modelAlpha : 1.0f);
                     glUniform1f(tessULighting, lighting ? 1.0f : 0.0f);
+                    glEnable(GL_POLYGON_OFFSET_FILL);
+                    glPolygonOffset(1.0f, 1.0f);
                     glBindVertexArray(subVAO);
                     glDrawElements(GL_TRIANGLES, totalSubTris * 3, GL_UNSIGNED_INT, nullptr);
+                    glDisable(GL_POLYGON_OFFSET_FILL);
                     if (transparent) {
                         glDepthMask(GL_TRUE);
                         glDisable(GL_BLEND);
@@ -1080,6 +1105,8 @@ int main(int argc, char* argv[]) {
                     glUseProgram(tessProgram);
                     glUniform1f(tessUAspect, aspect);
                     glUniform1f(tessUDist3D, 3.0f * focalLength);
+                    glUniform1f(tessUNear, 0.1f);
+                    glUniform1f(tessUFar, 20.0f);
                     glUniform1f(tessUAlpha, transparent ? modelAlpha : 1.0f);
                     glUniform1f(tessULighting, lighting ? 1.0f : 0.0f);
                     glBindVertexArray(tessVAO);
@@ -1142,19 +1169,23 @@ int main(int argc, char* argv[]) {
                         posA[d] = rotatedND[ia * dims + d];
                         posB[d] = rotatedND[ib * dims + d];
                     }
-                    // Skip edges whose midpoint is off-screen after stereographic + 3D camera projection
+                    // Frustum culling: skip edge only if BOTH endpoints project off-screen
                     {
-                        float* midP = (float*)alloca(dims * sizeof(float));
-                        for (unsigned int d = 0; d < dims; d++)
-                            midP[d] = (posA[d] + posB[d]) * 0.5f;
-                        float checkOut[3];
-                        projectStereographic(midP, checkOut, dims, focalLength);
+                        float checkA[3], checkB[3];
+                        projectStereographic(posA, checkA, dims, focalLength);
+                        projectStereographic(posB, checkB, dims, focalLength);
+                        if (!std::isfinite(checkA[0] + checkA[1] + checkA[2]) &&
+                            !std::isfinite(checkB[0] + checkB[1] + checkB[2]))
+                            continue;
                         float uDist = 3.0f * focalLength;
-                        float zDepth = uDist - checkOut[2];
-                        float perspDiv = zDepth > 0.1f ? zDepth : 0.1f;
-                        float ndc_x = checkOut[0] * uDist / aspect / perspDiv;
-                        float ndc_y = checkOut[1] * uDist / perspDiv;
-                        if (ndc_x > 1.0f || ndc_x < -1.0f || ndc_y > 1.0f || ndc_y < -1.0f)
+                        auto inView = [&](float* p) -> bool {
+                            float zDepth = uDist - p[2];
+                            float pd = zDepth > 0.1f ? zDepth : 0.1f;
+                            float nx = p[0] * uDist / aspect / pd;
+                            float ny = p[1] * uDist / pd;
+                            return nx >= -1.0f && nx <= 1.0f && ny >= -1.0f && ny <= 1.0f;
+                        };
+                        if (!inView(checkA) && !inView(checkB))
                             continue;
                     }
                     edgeOffsets.push_back(vertCount);
