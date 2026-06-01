@@ -2,7 +2,7 @@
 
 ![Demo](Demo.gif)
 
-A real-time N-dimensional object viewer that renders hyperdimensional geometry through recursive perspective projection, stereographic projection, or orthographic projection.
+A real-time N-dimensional object viewer that renders hyperdimensional geometry through recursive perspective projection.
 
 ## Origin
 
@@ -15,8 +15,6 @@ Ducky visualizes N-dimensional objects (3D, 4D, 5D, ...) by recursively projecti
 ## Features
 
 - **N-D Perspective Projection**: Recursively projects N-D geometry down to 3D, then to 2D screen space
-- **Stereographic Projection**: Maps N-D geometry onto a 3D sphere via stereographic projection (press `M` to cycle modes)
-- **Orthographic Projection**: Flat N-D to 3D projection without perspective foreshortening
 - **N-D Rotation**: All N×(N-1)/2 rotation planes controllable via on-screen slider panel or keyboard
 - **Per-Plane Auto-Rotate**: Toggle auto-rotation on/off for each individual rotation plane (green A / dark M)
 - **GUI Button Panel**: All controls accessible via clickable buttons on the right panel
@@ -32,7 +30,6 @@ Ducky visualizes N-dimensional objects (3D, 4D, 5D, ...) by recursively projecti
 - **Fullscreen Mode**: Toggle fullscreen with F11, restores windowed position within monitor bounds
 - **Screenshot**: Timestamped TGA screenshots via F12
 - **Performance Overlay**: FPS counter toggle (F1)
-- **Stereographic Subdivision**: Edges and faces are subdivided (subdiv=32) to approximate curved stereographic projections as piecewise-linear primitives
 - **Custom Model Format**: Simple `.dky` format with `dims N` header for defining N-D meshes
 - **Drag-and-Drop**: Drop model files onto the window to load (notification only)
 - **Cross-Platform**: Builds on Linux and Windows (via cross-compilation)
@@ -109,7 +106,6 @@ For 6D+ models, additional planes are accessible with Ctrl+ letter pairs:
 | `C` | Cycle color scheme (Golden → Rainbow → Monochrome → Warm) |
 | `L` | Toggle per-face lighting on/off |
 | `E` | Toggle wireframe-only mode (edges only, no faces) |
-| `M` | Cycle render mode: Perspective → Stereographic → Orthographic |
 | `[` / `]` | Decrease / increase focal length (perspective depth) |
 | `F11` | Toggle fullscreen |
 | `F12` | Take timestamped TGA screenshot |
@@ -168,7 +164,6 @@ Ducky/
 │   ├── main.cpp                # Application entry point & main loop
 │   ├── main.hpp                # Model struct & loader (LoadModel)
 │   ├── transform.hpp           # N-D transform, rotation, & projection math
-│   ├── stereo.hpp              # Stereographic subdivision, frustum culling, depth sort (unused — logic inlined in main.cpp)
 │   ├── shader.hpp              # Shader compilation & loading helpers
 │   ├── render.hpp              # Edge generation, face colors, draw utilities
 │   ├── io.hpp                  # Screenshot & state save/load
@@ -182,7 +177,7 @@ Ducky/
 │   └── text.vert/.frag         # On-screen text
 ├── include/                    # Headers (GLFW, GLAD, KHR)
 ├── bin/                        # Compiled binaries
-├── model.dky                   # Default 4D model (tesseract, 97 verts)
+├── model.dky                   # Default 4D model (tesseract, 96 verts)
 ├── model_5d.dky                # 5D hypercube (penteract, 320 verts)
 ├── BUGS.md                     # Known bugs and optimization notes
 ├── CMakeLists.txt              # Build configuration
