@@ -211,6 +211,7 @@ int main(int argc, char* argv[]) {
     GLuint tessUDist3D = glGetUniformLocation(tessProgram, "uDist3D");
     GLuint tessUAlpha = glGetUniformLocation(tessProgram, "uAlpha");
     GLuint tessULighting = glGetUniformLocation(tessProgram, "uLighting");
+    GLuint tessURenderMode = glGetUniformLocation(tessProgram, "uRenderMode");
 
     // === Axes setup ===
     GLuint axesVAO, axesVBO;
@@ -248,6 +249,7 @@ int main(int argc, char* argv[]) {
     if (!axesProgram) { glfwTerminate(); return -1; }
     GLuint axesUAspect = glGetUniformLocation(axesProgram, "uAspect");
     GLuint axesUDist3D = glGetUniformLocation(axesProgram, "uDist3D");
+    GLuint axesURenderMode = glGetUniformLocation(axesProgram, "uRenderMode");
 
     // === Wireframe edges setup ===
     GLuint edgeVAO, edgeVBO;
@@ -281,6 +283,7 @@ int main(int argc, char* argv[]) {
     if (!edgeProgram) { glfwTerminate(); return -1; }
     GLuint edgeUAspect = glGetUniformLocation(edgeProgram, "uAspect");
     GLuint edgeUDist3D = glGetUniformLocation(edgeProgram, "uDist3D");
+    GLuint edgeURenderMode = glGetUniformLocation(edgeProgram, "uRenderMode");
 
     // === UI setup ===
     GLuint uiProgram = createShaderProgramFromSrc(UI_VERT_SRC, UI_FRAG_SRC);
@@ -1031,6 +1034,7 @@ int main(int argc, char* argv[]) {
                         glDepthMask(GL_FALSE);
                     }
                     glUseProgram(tessProgram);
+                    glUniform1i(tessURenderMode, renderMode);
                     glUniform1f(tessUAspect, aspect);
                     glUniform1f(tessUDist3D, 3.0f * focalLength);
                     glUniform1f(tessUAlpha, transparent ? modelAlpha : 1.0f);
@@ -1078,6 +1082,7 @@ int main(int argc, char* argv[]) {
                         glDepthMask(GL_FALSE);
                     }
                     glUseProgram(tessProgram);
+                    glUniform1i(tessURenderMode, renderMode);
                     glUniform1f(tessUAspect, aspect);
                     glUniform1f(tessUDist3D, 3.0f * focalLength);
                     glUniform1f(tessUAlpha, transparent ? modelAlpha : 1.0f);
@@ -1120,6 +1125,7 @@ int main(int argc, char* argv[]) {
             glBindBuffer(GL_ARRAY_BUFFER, axesVBO);
             glBufferSubData(GL_ARRAY_BUFFER, 0, dims * 2 * 6 * sizeof(float), axis3D.data());
             glUseProgram(axesProgram);
+            glUniform1i(axesURenderMode, renderMode);
             glUniform1f(axesUAspect, aspect);
             glUniform1f(axesUDist3D, 3.0f * focalLength);
             glBindVertexArray(axesVAO);
@@ -1184,6 +1190,7 @@ int main(int argc, char* argv[]) {
 
             glDisable(GL_DEPTH_TEST);
             glUseProgram(edgeProgram);
+            glUniform1i(edgeURenderMode, renderMode);
             glUniform1f(edgeUAspect, aspect);
             glUniform1f(edgeUDist3D, 3.0f * focalLength);
             glBindVertexArray(edgeVAO);
