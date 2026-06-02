@@ -8,7 +8,7 @@ uniform float uAspect;
 uniform float uDist3D;
 
 const float Z_NEAR = 0.1;
-const float Z_FAR = 20.0;
+const float Z_FAR = 1000.0;
 
 void main() {
     float zDepth = uDist3D - aPos.z;
