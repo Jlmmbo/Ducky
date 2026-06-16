@@ -4,6 +4,7 @@
 #include <vector>
 #include <cstring>
 #include <algorithm>
+#include <unordered_map>
 
 #ifdef _WIN32
 #include <malloc.h>
@@ -40,6 +41,7 @@ struct MouseState {
     bool rightPressed = false;
     bool rightReleased = false;
     bool moved = false;
+    std::unordered_map<int, bool> keys;
 };
 
 inline void hslToRgb(float h, float s, float l, float& r, float& g, float& b) {

@@ -19,7 +19,7 @@ static bool isEmptyOrComment(const char* line) {
            (line[0] == '/' && line[1] == '/');
 }
 
-Model LoadModel(const char* path) {
+inline Model LoadModel(const char* path) {
     Model model;
 
     FILE* file = fopen(path, "r");

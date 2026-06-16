@@ -3,7 +3,9 @@
 #include <string>
 #include <iostream>
 #include <fstream>
-#include <glad/glad.h>
+#define GL_GLEXT_PROTOTYPES
+#include <GL/gl.h>
+#include <GL/glext.h>
 
 inline std::string loadFile(const std::string& path) {
     std::ifstream file(path, std::ios::binary);

@@ -7,8 +7,6 @@
 #include <cstring>
 #include <cstdio>
 #include <cmath>
-#include <glad/glad.h>
-#include "stb_easy_font.h"
 #include "main.hpp"
 #include "transform.hpp"
 
@@ -104,42 +102,6 @@ inline std::vector<Edge> generateEdges(const float* vertices, unsigned int verte
     for (auto& ec : edgeCounts)
         edges.push_back({reverseCanonical[ec.first.first], reverseCanonical[ec.first.second]});
     return edges;
-}
-
-inline void drawRect(GLuint program, GLuint vao, GLuint vbo,
-                     float x, float y, float w, float h,
-                     float r, float g, float b, float a,
-                     float screenW, float screenH) {
-    float verts[8] = {
-        x, y, x+w, y, x+w, y+h,
-        x, y+h
-    };
-    glBindBuffer(GL_ARRAY_BUFFER, vbo);
-    glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(verts), verts);
-    glUseProgram(program);
-    static GLuint uScreenSizeLoc = glGetUniformLocation(program, "uScreenSize");
-    static GLuint uColorLoc = glGetUniformLocation(program, "uColor");
-    glUniform2f(uScreenSizeLoc, screenW, screenH);
-    glUniform4f(uColorLoc, r, g, b, a);
-    glBindVertexArray(vao);
-    glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
-}
-
-inline int drawTextAt(GLuint vao, GLuint vbo, GLuint /*ebo*/, GLuint program,
-                      float x, float y, const char* text,
-                      float screenW, float screenH,
-                      const unsigned int* /*indices*/, int maxQuads) {
-    std::vector<char> buf(131072);
-    int nq = stb_easy_font_print(x, y, (char*)text, nullptr, buf.data(), (int)buf.size());
-    if (nq <= 0 || nq > maxQuads) return 0;
-    glBindBuffer(GL_ARRAY_BUFFER, vbo);
-    glBufferSubData(GL_ARRAY_BUFFER, 0, nq * 64, buf.data());
-    glUseProgram(program);
-    static GLuint uScreenSizeLoc = glGetUniformLocation(program, "uScreenSize");
-    glUniform2f(uScreenSizeLoc, screenW, screenH);
-    glBindVertexArray(vao);
-    glDrawElements(GL_TRIANGLES, nq * 6, GL_UNSIGNED_INT, nullptr);
-    return nq;
 }
 
 inline void assignFaceColors(Model& model, int colorScheme) {
