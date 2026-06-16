@@ -32,7 +32,6 @@
 constexpr float ROTATE_SPEED = 0.02f;
 constexpr float MOVE_SPEED = 2.0f;
 constexpr float AXIS_LENGTH = 1.5f;
-constexpr int EDGE_SUBDIV = 32;
 
 class DuckyView : public QOpenGLWidget, protected QOpenGLFunctions {
     Q_OBJECT
@@ -86,6 +85,8 @@ private slots:
 private:
     void processInput(float dt);
     void toggleFullscreen();
+    void buildStereographicMesh();
+    void buildStereographicEdges();
 
     Model m_model;
     std::vector<float> m_modelVertsBackup;
@@ -110,14 +111,16 @@ private:
     GLuint m_edgeUAspect = 0, m_edgeUDist3D = 0, m_edgeURenderMode = 0;
     std::vector<Edge> m_edges;
 
-    GLuint m_subVAO = 0, m_subVBO = 0, m_subEBO = 0;
+    GLuint m_subdivVAO = 0, m_subdivVBO = 0, m_subdivEBO = 0;
+    GLuint m_subdivEdgeVAO = 0, m_subdivEdgeVBO = 0;
 
     std::vector<float> m_projectedVerts;
     std::vector<float> m_rotatedND;
     std::vector<float> m_axis3D;
     std::vector<float> m_edge3D;
-    std::vector<float> m_subVerts;
-    std::vector<unsigned int> m_subIdx;
+    std::vector<float> m_subdivVerts;
+    std::vector<unsigned int> m_subdivIndices;
+    std::vector<float> m_subdivEdgeVerts;
 
     bool m_showPerformance = false;
     bool m_wireframeOnly = false;
@@ -131,6 +134,7 @@ private:
     bool m_lighting = true;
     float m_modelAlpha = 0.35f;
     bool m_newControls = true;
+    int m_subdivisionLevel = 4;
 
     int m_windowedX = 0, m_windowedY = 0;
     int m_windowedW = 0, m_windowedH = 0;

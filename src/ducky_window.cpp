@@ -367,7 +367,7 @@ QWidget* DuckyWindow::createRightPanel() {
         }},
         {"Focus -", [this]() { m_view->setFocalLength(m_view->focalLength() - 0.1f); }},
         {"Focus +", [this]() { m_view->setFocalLength(m_view->focalLength() + 0.1f); }},
-        {"Render Mode", [this]() { m_view->setRenderMode(m_view->renderMode() + 1); }},
+        {"Render Mode", [this]() { m_view->setRenderMode(m_view->renderMode() + 1); m_view->update(); }},
         {"Fullscreen", [this]() {
             if (isFullScreen()) showNormal(); else showFullScreen();
         }},
@@ -397,7 +397,7 @@ void DuckyWindow::syncInfoPanel() {
     auto& t = m_view->transform();
 
     const char* colorSchemeNames[5] = {"Model", "Golden", "Rainbow", "Mono", "Warm"};
-    const char* renderModeNames[] = {"Perspective", "Stereographic", "Orthographic"};
+    const char* renderModeNames[] = {"Perspective", "Orthographic", "Stereographic"};
 
     QString info;
     info += QString("%1D Model\n").arg(dims);

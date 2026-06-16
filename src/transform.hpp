@@ -106,33 +106,30 @@ inline void projectOrthographic(const float* in, float* out, int dims) {
 }
 
 inline void projectStereographic(const float* in, float* out, int dims, float focalLength) {
-    int ndim = dims < 4 ? 4 : dims;
-    float* tmp = (float*)alloca(ndim * sizeof(float));
-    for (int i = 0; i < dims; i++) tmp[i] = in[i];
-    for (int i = dims; i < ndim; i++) tmp[i] = 0.0f;
+    float* tmp = (float*)alloca(dims * sizeof(float));
+    float lenSq = 0;
+    for (int i = 0; i < dims; i++) {
+        tmp[i] = in[i];
+        lenSq += in[i] * in[i];
+    }
 
-    for (int d = dims - 1; d >= 4; d--) {
-        float dist = focalLength * 3.0f;
-        float depth = dist - tmp[d];
-        float s = depth > 0.001f ? dist / depth : 10.0f;
+    // Normalize to sphere of radius R, then stereographic projection
+    float R = focalLength * 3.0f;
+    float len = sqrtf(lenSq);
+    if (len > 0.0001f) {
+        float invLen = R / len;
+        for (int i = 0; i < dims; i++) tmp[i] *= invLen;
+    }
+
+    // Recursive stereographic projection from each extra dimension
+    for (int d = dims - 1; d >= 3; d--) {
+        float denom = R - tmp[d];
+        float scale = denom > 0.001f ? R / denom : 10.0f;
         for (int c = 0; c < d; c++)
-            tmp[c] *= s;
+            tmp[c] *= scale;
     }
 
-    float x = tmp[0], y = tmp[1], z = tmp[2], w = dims > 3 ? tmp[3] : 0.0f;
-    float radius = sqrtf(x*x + y*y + z*z + w*w);
-    float denom = radius - w;
-    if (fabsf(denom) < 0.001f) denom = 0.001f;
-    float s = radius / denom;
-    out[0] = x * s;
-    out[1] = y * s;
-    out[2] = z * s;
-    // Clamp output length to prevent extreme coordinates that cause artifacts
-    float outLen = sqrtf(out[0]*out[0] + out[1]*out[1] + out[2]*out[2]);
-    if (outLen > 6.0f) {
-        float scale = 6.0f / outLen;
-        out[0] *= scale;
-        out[1] *= scale;
-        out[2] *= scale;
-    }
+    out[0] = tmp[0];
+    out[1] = tmp[1];
+    out[2] = tmp[2];
 }
