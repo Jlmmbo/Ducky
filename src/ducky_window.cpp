@@ -28,13 +28,13 @@ DuckyWindow::DuckyWindow(const char* modelPath, QWidget* parent)
     setCentralWidget(central);
 
     statusBar()->showMessage(
-        QString("%1D | Tab=toggle controls F11=FS F12=shot F1=perf | Right panel has all controls")
+        QString("%1D | Shift=toggle controls F11=FS F12=shot F1=perf | Right panel has all controls")
             .arg(m_view->dimensions()));
 
     connect(m_view, &DuckyView::stateChanged, this, &DuckyWindow::syncInfoPanel);
     connect(m_view, &DuckyView::fpsUpdated, this, [this](float fps) {
         statusBar()->showMessage(
-            QString("FPS: %1 | %2D | Tab=toggle controls F11=FS F12=shot F1=perf")
+            QString("FPS: %1 | %2D | Shift=toggle controls F11=FS F12=shot F1=perf")
                 .arg(fps, 0, 'f', 1)
                 .arg(m_view->dimensions()));
     });
@@ -83,7 +83,7 @@ QWidget* DuckyWindow::createLeftPanel() {
     layout->setContentsMargins(6, 6, 6, 6);
     layout->setSpacing(4);
 
-    QPushButton* toggleBtn = new QPushButton("Toggle Controls (Tab)", panel);
+    QPushButton* toggleBtn = new QPushButton("Toggle Controls (Shift)", panel);
     toggleBtn->setStyleSheet(
         "QPushButton { background-color: #2a2a4e; color: #ccc; border: 1px solid #444; padding: 4px; }"
         "QPushButton:hover { background-color: #3a3a5e; }");

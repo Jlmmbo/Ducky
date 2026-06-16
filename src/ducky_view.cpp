@@ -20,7 +20,7 @@ DuckyView::DuckyView(const char* modelPath, QWidget* parent)
     m_transform.modelAngles.resize(m_transform.planeCount(), 0.0f);
     m_transform.autoRotate.resize(m_transform.planeCount(), true);
     m_transform.translation.resize(m_dims, 0.0f);
-    if (m_dims > 2) m_transform.translation[2] = -2.0f;
+    if (m_dims > 2) m_transform.translation[2] = -4.0f;
 
     m_edges = generateEdges(m_model.vertices.data(), m_model.vertexCount,
                              m_dims, m_fpv, m_model.indices.data(), m_model.indexCount);
@@ -177,7 +177,7 @@ void DuckyView::processInput(float dt) {
             std::fill(m_transform.angles.begin(), m_transform.angles.end(), 0.0f);
             std::fill(m_transform.modelAngles.begin(), m_transform.modelAngles.end(), 0.0f);
             std::fill(m_transform.translation.begin(), m_transform.translation.end(), 0.0f);
-            if (m_dims > 2) m_transform.translation[2] = -2.0f;
+            if (m_dims > 2) m_transform.translation[2] = -4.0f;
         }
         return;
     }
@@ -219,7 +219,7 @@ void DuckyView::processInput(float dt) {
         std::fill(m_transform.angles.begin(), m_transform.angles.end(), 0.0f);
         std::fill(m_transform.modelAngles.begin(), m_transform.modelAngles.end(), 0.0f);
         std::fill(m_transform.translation.begin(), m_transform.translation.end(), 0.0f);
-        if (m_dims > 2) m_transform.translation[2] = -2.0f;
+        if (m_dims > 2) m_transform.translation[2] = -4.0f;
     }
 }
 
@@ -571,7 +571,7 @@ void DuckyView::resetTransform() {
     std::fill(m_transform.angles.begin(), m_transform.angles.end(), 0.0f);
     std::fill(m_transform.modelAngles.begin(), m_transform.modelAngles.end(), 0.0f);
     std::fill(m_transform.translation.begin(), m_transform.translation.end(), 0.0f);
-    if (m_dims > 2) m_transform.translation[2] = -2.0f;
+    if (m_dims > 2) m_transform.translation[2] = -4.0f;
     update();
 }
 
@@ -639,7 +639,7 @@ void DuckyView::keyPressEvent(QKeyEvent* e) {
     m_mouse.keys[e->key()] = true;
 
     switch (e->key()) {
-    case Qt::Key_Tab:
+    case Qt::Key_Shift:
         m_newControls = !m_newControls;
         emit controlsModeChanged(m_newControls);
         break;
