@@ -136,8 +136,8 @@ void DuckyView::initializeGL() {
     m_edgeUDist3D = glGetUniformLocation(m_edgeProgram, "uDist3D");
     m_edgeURenderMode = glGetUniformLocation(m_edgeProgram, "uRenderMode");
 
-    int maxVertsPerTri = (EDGE_SUBDIV + 1) * (EDGE_SUBDIV + 2) / 2;
-    int maxTrisPerTri = EDGE_SUBDIV * EDGE_SUBDIV;
+    int maxVertsPerTri = (EDGE_SUBDIV + 1) * (EDGE_SUBDIV + 1);
+    int maxTrisPerTri = EDGE_SUBDIV * (EDGE_SUBDIV + 1);
     glGenVertexArrays(1, &m_subVAO);
     glGenBuffers(1, &m_subVBO);
     glGenBuffers(1, &m_subEBO);
@@ -267,14 +267,33 @@ void DuckyView::paintGL() {
         }
     }
 
+    if (g_debug) {
+        m_farthestVertIndex = 0;
+        float maxDistSq = 0;
+        for (unsigned int i = 0; i < m_model.vertexCount; i++) {
+            float distSq = 0;
+            for (unsigned int d = 0; d < m_dims; d++) {
+                float v = m_rotatedND[i * m_dims + d];
+                distSq += v * v;
+            }
+            if (distSq > maxDistSq) {
+                maxDistSq = distSq;
+                m_farthestVertIndex = i;
+            }
+        }
+        m_farthestVertCoords.resize(m_dims);
+        for (unsigned int d = 0; d < m_dims; d++)
+            m_farthestVertCoords[d] = m_rotatedND[m_farthestVertIndex * m_dims + d];
+    }
+
     glViewport(0, 0, width() * devicePixelRatio(), height() * devicePixelRatio());
 
     unsigned int numTri = m_model.indexCount / 3;
 
     if (m_renderMode == 1) {
         int n = EDGE_SUBDIV;
-        int vertsPerTri = (n + 1) * (n + 2) / 2;
-        int trisPerTri = n * n;
+        int vertsPerTri = (n + 1) * (n + 1);
+        int trisPerTri = n * (n + 1);
         unsigned int totalSubTris = numTri * trisPerTri;
         unsigned int totalSubVerts = numTri * vertsPerTri;
 
@@ -311,59 +330,91 @@ void DuckyView::paintGL() {
             unsigned int triTriBase = t * trisPerTri;
 
             for (int j = 0; j <= n; j++) {
-                int rowOff = j * (n + 1) - j * (j - 1) / 2;
-                for (int i = 0; i <= n - j; i++) {
+                for (int i = 0; i <= n; i++) {
                     float u = (float)i / n;
                     float v = (float)j / n;
-                    float w = 1.0f - u - v;
-                    int vidx = triVertBase + rowOff + i;
+                    float s = 1.0f - u - v;
+                    if (s < 0.0f) {
+                        float inv = 1.0f / (u + v);
+                        u *= inv;
+                        v *= inv;
+                        s = 0.0f;
+                    }
+                    int vidx = triVertBase + j * (n + 1) + i;
 
                     for (unsigned int d = 0; d < m_dims; d++)
-                        interp[d] = tposA[d] * w + tposB[d] * u + tposC[d] * v;
+                        interp[d] = tposA[d] * s + tposB[d] * u + tposC[d] * v;
                     projectStereographic(interp, &m_subVerts[vidx * 6], m_dims, m_focalLength);
 
-                    m_subVerts[vidx * 6 + 3] = rA * w + rB * u + rC * v;
-                    m_subVerts[vidx * 6 + 4] = gA * w + gB * u + gC * v;
-                    m_subVerts[vidx * 6 + 5] = bA * w + bB * u + bC * v;
+                    m_subVerts[vidx * 6 + 3] = rA * s + rB * u + rC * v;
+                    m_subVerts[vidx * 6 + 4] = gA * s + gB * u + gC * v;
+                    m_subVerts[vidx * 6 + 5] = bA * s + bB * u + bC * v;
                 }
             }
 
             unsigned int subTriCount = 0;
             for (int j = 0; j < n; j++) {
-                int rowOffJ = j * (n + 1) - j * (j - 1) / 2;
-                int rowOffJ1 = (j + 1) * (n + 1) - (j + 1) * j / 2;
-                for (int i = 0; i < n - j; i++) {
-                    unsigned int v00 = triVertBase + rowOffJ + i;
-                    unsigned int v10 = triVertBase + rowOffJ + i + 1;
-                    unsigned int v01 = triVertBase + rowOffJ1 + i;
+                for (int i = 0; i < n; i++) {
+                    if (i + j >= n) continue;
+                    unsigned int v00 = triVertBase + j * (n + 1) + i;
+                    unsigned int v10 = triVertBase + j * (n + 1) + i + 1;
+                    unsigned int v01 = triVertBase + (j + 1) * (n + 1) + i;
+                    unsigned int v11 = triVertBase + (j + 1) * (n + 1) + i + 1;
 
-                    unsigned int ti = triTriBase + subTriCount;
-
+                    unsigned int ti = triTriBase + subTriCount * 2;
                     m_subIdx[ti * 3 + 0] = v00;
                     m_subIdx[ti * 3 + 1] = v10;
                     m_subIdx[ti * 3 + 2] = v01;
+                    m_subIdx[ti * 3 + 3] = v10;
+                    m_subIdx[ti * 3 + 4] = v11;
+                    m_subIdx[ti * 3 + 5] = v01;
                     subTriCount++;
-
-                    if (i + j < n - 1) {
-                        unsigned int v11 = triVertBase + rowOffJ1 + i + 1;
-                        unsigned int ti2 = triTriBase + subTriCount;
-                        m_subIdx[ti2 * 3 + 0] = v10;
-                        m_subIdx[ti2 * 3 + 1] = v11;
-                        m_subIdx[ti2 * 3 + 2] = v01;
-                        subTriCount++;
-                    }
                 }
             }
+        }
+
+        std::vector<float> triDepth(numTri);
+        for (unsigned int t = 0; t < numTri; t++) {
+            int i0 = m_model.indices[t * 3];
+            int i1 = m_model.indices[t * 3 + 1];
+            int i2 = m_model.indices[t * 3 + 2];
+            triDepth[t] = (m_projectedVerts[i0 * 6 + 2] +
+                           m_projectedVerts[i1 * 6 + 2] +
+                           m_projectedVerts[i2 * 6 + 2]) / 3.0f;
+        }
+
+        std::vector<int> triOrder(numTri);
+        for (unsigned int i = 0; i < numTri; i++) triOrder[i] = i;
+        std::sort(triOrder.begin(), triOrder.end(), [&](int a, int b) {
+            return triDepth[a] < triDepth[b];
+        });
+
+        std::vector<unsigned int> sortedIdx(totalSubTris * 3);
+        unsigned int idxOff = 0;
+        for (unsigned int ti = 0; ti < numTri; ti++) {
+            int t = triOrder[ti];
+            unsigned int base = t * trisPerTri * 3;
+            for (unsigned int j = 0; j < trisPerTri * 3; j++)
+                sortedIdx[idxOff + j] = m_subIdx[base + j];
+            idxOff += trisPerTri * 3;
         }
 
         glBindBuffer(GL_ARRAY_BUFFER, m_subVBO);
         glBufferSubData(GL_ARRAY_BUFFER, 0, totalSubVerts * 6 * sizeof(float), m_subVerts.data());
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_subEBO);
-        glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, 0, totalSubTris * 3 * sizeof(unsigned int), m_subIdx.data());
+        glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, 0, totalSubTris * 3 * sizeof(unsigned int), sortedIdx.data());
+
+        if (g_debug) {
+            std::cout << "stereo: " << totalSubVerts << " verts, " << totalSubTris << " tris"
+                      << "  v0=(" << m_subVerts[0] << "," << m_subVerts[1] << "," << m_subVerts[2]
+                      << ") c0=(" << m_subVerts[3] << "," << m_subVerts[4] << "," << m_subVerts[5] << ")"
+                      << "  idx0=" << sortedIdx[0] << " " << sortedIdx[1] << " " << sortedIdx[2]
+                      << std::endl;
+        }
 
         glClearColor(0.05f, 0.05f, 0.1f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-        glEnable(GL_DEPTH_TEST);
+        glDisable(GL_DEPTH_TEST);
 
         if (!m_wireframeOnly) {
             if (m_transparent) {
@@ -462,20 +513,6 @@ void DuckyView::paintGL() {
                     posA[d] = m_rotatedND[ia * m_dims + d];
                     posB[d] = m_rotatedND[ib * m_dims + d];
                 }
-                {
-                    float* midP = (float*)alloca(m_dims * sizeof(float));
-                    for (unsigned int d = 0; d < m_dims; d++)
-                        midP[d] = (posA[d] + posB[d]) * 0.5f;
-                    float checkOut[3];
-                    projectStereographic(midP, checkOut, m_dims, m_focalLength);
-                    float uDist = 3.0f * m_focalLength;
-                    float zDepth = uDist - checkOut[2];
-                    float perspDiv = zDepth > 0.1f ? zDepth : 0.1f;
-                    float ndc_x = checkOut[0] * uDist / aspect / perspDiv;
-                    float ndc_y = checkOut[1] * uDist / perspDiv;
-                    if (ndc_x > 1.0f || ndc_x < -1.0f || ndc_y > 1.0f || ndc_y < -1.0f)
-                        continue;
-                }
                 edgeOffsets.push_back(vertCount);
                 for (int s = 0; s <= EDGE_SUBDIV; s++) {
                     float t = (float)s / (float)EDGE_SUBDIV;
@@ -545,6 +582,17 @@ void DuckyView::paintGL() {
         .arg(m_dims);
     painter.setPen(QColor(200, 200, 200));
     painter.drawText(20, height() - 20, hint);
+
+    if (g_debug && m_farthestVertIndex >= 0) {
+        QString debugStr = QString("Debug: farthest vertex %1: (").arg(m_farthestVertIndex);
+        for (unsigned int d = 0; d < m_dims; d++) {
+            debugStr += QString::number(m_farthestVertCoords[d], 'f', 3);
+            if (d < m_dims - 1) debugStr += ", ";
+        }
+        debugStr += ")";
+        painter.setPen(Qt::yellow);
+        painter.drawText(20, height() - 60, debugStr);
+    }
 
     painter.end();
 
@@ -694,6 +742,17 @@ void DuckyView::keyPressEvent(QKeyEvent* e) {
                 case 2: for (int i = 0; i < m_transform.planeCount(); i++) m_transform.autoRotate[i] = (i % 2 == 0); break;
                 case 3: for (int i = 0; i < m_transform.planeCount(); i++) m_transform.autoRotate[i] = (i % 3 == 0); break;
             }
+        }
+        break;
+    case Qt::Key_Return:
+    case Qt::Key_Enter:
+        if (g_debug && m_farthestVertIndex >= 0) {
+            std::cout << "Debug: farthest vertex " << m_farthestVertIndex << ": (";
+            for (unsigned int d = 0; d < m_dims; d++) {
+                std::cout << m_farthestVertCoords[d];
+                if (d < m_dims - 1) std::cout << ", ";
+            }
+            std::cout << ")" << std::endl;
         }
         break;
     case Qt::Key_BracketLeft:

@@ -141,4 +141,7 @@ private:
     double m_perfLastTime = 0;
     int m_perfFrameCount = 0;
     float m_perfFps = 0.0f;
+
+    int m_farthestVertIndex = -1;
+    std::vector<float> m_farthestVertCoords;
 };

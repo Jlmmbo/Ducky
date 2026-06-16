@@ -6,6 +6,8 @@
 #include <cstdlib>
 #include <vector>
 
+extern bool g_debug;
+
 struct Model {
     std::vector<float> vertices;
     std::vector<unsigned int> indices;
