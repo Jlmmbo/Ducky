@@ -452,7 +452,7 @@ void DuckyView::paintGL() {
 
     glViewport(0, 0, width() * devicePixelRatio(), height() * devicePixelRatio());
 
-    int shaderMode = 0;
+    int shaderMode = m_renderMode == 1 ? 2 : 0;
     bool isStereographic = (m_renderMode == 2);
 
     if (isStereographic) {
