@@ -165,7 +165,11 @@ void DuckyView::initializeGL() {
 
     glBindVertexArray(m_edgeVAO);
     glBindBuffer(GL_ARRAY_BUFFER, m_edgeVBO);
-    glBufferData(GL_ARRAY_BUFFER, m_edges.size() * 2 * 3 * sizeof(float), nullptr, GL_DYNAMIC_DRAW);
+    {
+        // Initialize with actual data to avoid driver lazy-allocation issues
+        std::vector<float> initData(m_edges.size() * 2 * 3, 0.0f);
+        glBufferData(GL_ARRAY_BUFFER, initData.size() * sizeof(float), initData.data(), GL_DYNAMIC_DRAW);
+    }
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), nullptr);
     glEnableVertexAttribArray(0);
 
@@ -440,6 +444,7 @@ void DuckyView::paintGL() {
         buildStereographicEdges();
         glBindBuffer(GL_ARRAY_BUFFER, m_subdivEdgeVBO);
         glBufferData(GL_ARRAY_BUFFER, m_subdivEdgeVerts.size() * sizeof(float), m_subdivEdgeVerts.data(), GL_DYNAMIC_DRAW);
+        glLineWidth(2.0f);
         glDisable(GL_DEPTH_TEST);
         glUseProgram(m_edgeProgram);
         glUniform1i(m_edgeURenderMode, shaderMode);
@@ -448,6 +453,7 @@ void DuckyView::paintGL() {
         glBindVertexArray(m_subdivEdgeVAO);
         glDrawArrays(GL_LINES, 0, (GLsizei)(m_subdivEdgeVerts.size() / 3));
         glEnable(GL_DEPTH_TEST);
+        glLineWidth(1.0f);
     } else {
         size_t vertCount = 0;
         for (size_t i = 0; i < m_edges.size(); i++) {
@@ -464,14 +470,20 @@ void DuckyView::paintGL() {
         glBindBuffer(GL_ARRAY_BUFFER, m_edgeVBO);
         glBufferSubData(GL_ARRAY_BUFFER, 0, vertCount * 3 * sizeof(float), m_edge3D.data());
 
+        glLineWidth(2.0f);
         glDisable(GL_DEPTH_TEST);
         glUseProgram(m_edgeProgram);
         glUniform1i(m_edgeURenderMode, shaderMode);
         glUniform1f(m_edgeUAspect, aspect);
         glUniform1f(m_edgeUDist3D, 3.0f * m_focalLength);
         glBindVertexArray(m_edgeVAO);
+        glBindBuffer(GL_ARRAY_BUFFER, m_edgeVBO);
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), nullptr);
+        glEnableVertexAttribArray(0);
         glDrawArrays(GL_LINES, 0, (GLsizei)vertCount);
+
         glEnable(GL_DEPTH_TEST);
+        glLineWidth(1.0f);
     }
 
     if (m_showPerformance) {
