@@ -13,6 +13,7 @@
 #include <QWheelEvent>
 #include <QPainter>
 #include <QOpenGLContext>
+#include <QImage>
 
 #include <iostream>
 #include <string>
@@ -50,6 +51,7 @@ public:
     float modelAlpha() const { return m_modelAlpha; }
     unsigned int dimensions() const { return m_dims; }
     const std::vector<Edge>& edges() const { return m_edges; }
+    int subdivisionLevel() const { return m_subdivisionLevel; }
 
     void setWireframe(bool on);
     void setColorScheme(int scheme);
@@ -57,11 +59,13 @@ public:
     void setFocalLength(float fl);
     void setLighting(bool on);
     void setTransparent(bool on);
+    void setSubdivisionLevel(int level);
     void resetTransform();
     void saveState(const char* path);
     void loadState(const char* path);
     void takeScreenshot();
     void setModelAlpha(float a) { m_modelAlpha = a; }
+    void exportOBJ(const char* path);
 
 signals:
     void stateChanged();
@@ -87,6 +91,8 @@ private:
     void toggleFullscreen();
     void buildStereographicMesh();
     void buildStereographicEdges();
+    void updateHUDCache();
+    int findNearestVertex(float mx, float my);
 
     Model m_model;
     std::vector<float> m_modelVertsBackup;
@@ -96,7 +102,7 @@ private:
     TransformND m_transform;
     MouseState m_mouse;
 
-    GLuint m_tessVAO = 0, m_tessVBO = 0, m_tessEBO = 0;
+    GLuint m_tessVAO = 0, m_tessVBO = 0, m_tessEBO = 0, m_tessTransparentEBO = 0;
     GLuint m_tessProgram = 0;
     GLuint m_tessUAspect = 0, m_tessUDist3D = 0, m_tessUAlpha = 0;
     GLuint m_tessULighting = 0, m_tessURenderMode = 0;
@@ -108,7 +114,7 @@ private:
 
     GLuint m_edgeVAO = 0, m_edgeVBO = 0;
     GLuint m_edgeProgram = 0;
-    GLuint m_edgeUAspect = 0, m_edgeUDist3D = 0, m_edgeURenderMode = 0;
+    GLuint m_edgeUAspect = 0, m_edgeUDist3D = 0, m_edgeURenderMode = 0, m_edgeUAlpha = 0;
     std::vector<Edge> m_edges;
 
     GLuint m_subdivVAO = 0, m_subdivVBO = 0, m_subdivEBO = 0;
@@ -118,6 +124,7 @@ private:
     std::vector<float> m_rotatedND;
     std::vector<float> m_axis3D;
     std::vector<float> m_edge3D;
+    std::vector<float> m_mergedLineVerts;
     std::vector<float> m_subdivVerts;
     std::vector<unsigned int> m_subdivIndices;
     std::vector<float> m_subdivEdgeVerts;
@@ -151,4 +158,31 @@ private:
 
     int m_farthestVertIndex = -1;
     std::vector<float> m_farthestVertCoords;
+
+    std::string m_shaderDir;
+
+    std::vector<float> m_rotCos;
+    std::vector<float> m_rotSin;
+
+    std::vector<float> m_ndPos;
+
+    bool m_dirty = true;
+
+    // Feature: vertex dots
+    bool m_showVertices = false;
+
+    // Feature: edge highlighting
+    bool m_hoverEnabled = false;
+    int m_highlightedVertex = -1;
+
+    // Feature: depth of field
+    bool m_depthOfField = false;
+
+    // Feature: per-axis edge coloring
+    bool m_axisEdgeColoring = true;
+
+    // Opt: cached HUD overlay
+    QImage m_hudImage;
+    bool m_hudDirty = true;
+    QString m_lastHUDText;
 };

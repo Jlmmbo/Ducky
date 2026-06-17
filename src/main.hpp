@@ -49,10 +49,28 @@ inline Model LoadModel(const char* path) {
                 dimsRead = true;
                 continue;
             }
+            if (!dimsRead) {
+                std::cerr << "Warning: No 'dims' header found in " << path
+                          << "; assuming 4D" << std::endl;
+            }
             dimsRead = true;
         }
 
         if (strncmp(line, "face", 4) == 0) { section = true; continue; }
+        if (strncmp(line, "strip", 5) == 0) {
+            section = true;
+            int n = 0;
+            const char* ptr = line + 5;
+            while (*ptr) {
+                char* end;
+                strtoul(ptr, &end, 10);
+                if (end == ptr) break;
+                n++;
+                ptr = end;
+            }
+            if (n >= 3) idxCount += (n - 2) * 3;
+            continue;
+        }
         if (!section) vertCount++;
         else idxCount += 3;
     }
@@ -85,6 +103,37 @@ inline Model LoadModel(const char* path) {
         }
 
         if (strncmp(line, "face", 4) == 0) { section = true; continue; }
+        if (strncmp(line, "strip", 5) == 0) {
+            // Parse triangle strip: strip v0 v1 v2 v3 ...
+            // Convert to triangles: (0,1,2), (1,2,3), (2,3,4), ...
+            unsigned int stripVerts[256];
+            int n = 0;
+            const char* ptr = line + 5;
+            while (n < 256) {
+                char* end;
+                unsigned int v = (unsigned int)strtoul(ptr, &end, 10);
+                if (end == ptr) break;
+                if (v >= model.vertexCount) {
+                    std::cerr << "Index out of bounds in strip in " << path << std::endl;
+                    break;
+                }
+                stripVerts[n++] = v;
+                ptr = end;
+            }
+            for (int s = 0; s < n - 2; s++) {
+                if (s % 2 == 0) {
+                    model.indices[ii] = stripVerts[s];
+                    model.indices[ii + 1] = stripVerts[s + 1];
+                    model.indices[ii + 2] = stripVerts[s + 2];
+                } else {
+                    model.indices[ii] = stripVerts[s + 1];
+                    model.indices[ii + 1] = stripVerts[s];
+                    model.indices[ii + 2] = stripVerts[s + 2];
+                }
+                ii += 3;
+            }
+            continue;
+        }
 
         if (!section) {
             std::vector<float> vals(fpv);

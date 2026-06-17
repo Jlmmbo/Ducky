@@ -13,17 +13,12 @@ const float Z_NEAR = 0.1;
 const float Z_FAR = 1000.0;
 
 void main() {
-    float w;
-    float clip_z;
-    if (uRenderMode == 2) {
-        w = 1.0;
-        clip_z = -2.0 * aPos.z / (Z_FAR - Z_NEAR) - (Z_FAR + Z_NEAR) / (Z_FAR - Z_NEAR);
-    } else {
-        float perspDiv = max(-aPos.z, 0.1);
-        w = perspDiv;
-        clip_z = aPos.z * (Z_FAR + Z_NEAR) / (Z_NEAR - Z_FAR) + 2.0 * Z_FAR * Z_NEAR / (Z_NEAR - Z_FAR);
-    }
-    gl_Position = vec4(aPos.x * uDist3D / uAspect, aPos.y * uDist3D, clip_z, w);
+    float zDepth = uDist3D - aPos.z;
+    float perspDiv = zDepth > 0.001 ? zDepth : 0.001;
+
+    float z_eye = aPos.z - uDist3D;
+    float clip_z = z_eye * (Z_FAR + Z_NEAR) / (Z_NEAR - Z_FAR) + 2.0 * Z_FAR * Z_NEAR / (Z_NEAR - Z_FAR);
+    gl_Position = vec4(aPos.x * uDist3D / uAspect, aPos.y * uDist3D, clip_z, perspDiv);
     vColor = aColor;
     vPos = aPos;
 }

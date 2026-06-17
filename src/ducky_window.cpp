@@ -72,7 +72,54 @@ void DuckyWindow::dropEvent(QDropEvent* e) {
 }
 
 void DuckyWindow::loadModel(const QString& path) {
-    statusBar()->showMessage("Drop not fully supported - restart with model path");
+    DuckyView* oldView = m_view;
+    m_view = new DuckyView(path.toUtf8().constData(), this);
+    m_view->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+
+    QLayout* mainLayout = centralWidget()->layout();
+    if (mainLayout) {
+        QLayoutItem* item = nullptr;
+        for (int i = 0; i < mainLayout->count(); i++) {
+            if (mainLayout->itemAt(i)->widget() == oldView) {
+                item = mainLayout->itemAt(i);
+                break;
+            }
+        }
+        if (item) {
+            mainLayout->removeWidget(oldView);
+            delete oldView;
+            dynamic_cast<QHBoxLayout*>(mainLayout)->insertWidget(1, m_view, 1);
+        }
+    }
+    m_view->setFocus();
+    setWindowTitle(QString("Ducky - %1").arg(QFileInfo(path).fileName()));
+
+    QWidget* oldSlider = m_controlStack->widget(1);
+    if (oldSlider) {
+        m_controlStack->removeWidget(oldSlider);
+        delete oldSlider;
+    }
+    m_controlStack->addWidget(createSliderControls());
+    m_controlStack->setCurrentIndex(m_newControls ? 0 : 1);
+
+    connect(m_view, &DuckyView::stateChanged, this, &DuckyWindow::syncInfoPanel);
+    connect(m_view, &DuckyView::fpsUpdated, this, [this](float fps) {
+        statusBar()->showMessage(
+            QString("FPS: %1 | %2D | Shift=toggle controls F11=FS F12=shot F1=perf")
+                .arg(fps, 0, 'f', 1)
+                .arg(m_view->dimensions()));
+    });
+    connect(m_view, &DuckyView::fullscreenRequested, this, [this]() {
+        if (isFullScreen()) showNormal(); else showFullScreen();
+    });
+    connect(m_view, &DuckyView::controlsModeChanged, this, [this](bool nc) {
+        m_controlStack->setCurrentIndex(nc ? 0 : 1);
+    });
+
+    statusBar()->showMessage(QString("Loaded %1D model: %2")
+        .arg(m_view->dimensions())
+        .arg(QFileInfo(path).fileName()));
+    syncInfoPanel();
 }
 
 QWidget* DuckyWindow::createLeftPanel() {
@@ -328,6 +375,26 @@ QWidget* DuckyWindow::createRightPanel() {
 
     layout->addSpacing(8);
 
+    // Subdivision level slider (Feature 10)
+    QGroupBox* subdivGroup = new QGroupBox("Subdivision", panel);
+    subdivGroup->setStyleSheet(
+        "QGroupBox { color: #ddd; border: 1px solid #444; padding: 4px; margin-top: 8px; }"
+        "QGroupBox::title { subcontrol-origin: margin; left: 8px; padding: 0 4px; }");
+    QVBoxLayout* subdivLay = new QVBoxLayout(subdivGroup);
+    subdivLay->setContentsMargins(4, 4, 4, 4);
+    QSlider* subdivSlider = new QSlider(Qt::Horizontal, subdivGroup);
+    subdivSlider->setRange(1, 8);
+    subdivSlider->setValue(m_view->subdivisionLevel());
+    subdivSlider->setStyleSheet(
+        "QSlider::groove:horizontal { background: #333; height: 8px; border-radius: 4px; }"
+        "QSlider::handle:horizontal { background: #55aa55; width: 12px; margin: -4px 0; border-radius: 4px; }"
+        "QSlider::sub-page:horizontal { background: #55aa55; border-radius: 4px; }");
+    connect(subdivSlider, &QSlider::valueChanged, this, [this](int val) {
+        m_view->setSubdivisionLevel(val);
+    });
+    subdivLay->addWidget(subdivSlider);
+    layout->addWidget(subdivGroup);
+
     QGroupBox* actions = new QGroupBox("Actions", panel);
     actions->setStyleSheet(
         "QGroupBox { color: #ddd; border: 1px solid #444; padding: 4px; margin-top: 8px; }"
@@ -351,8 +418,7 @@ QWidget* DuckyWindow::createRightPanel() {
         {"Reset All", [this]() { m_view->resetTransform(); }},
         {"Wireframe", [this]() { m_view->setWireframe(!m_view->wireframe()); }},
         {"Color Scheme", [this]() {
-            int sc = (m_view->colorScheme() + 1) % 4;
-            m_view->setColorScheme(sc);
+            m_view->setColorScheme(m_view->colorScheme() + 1);
         }},
         {"Rotation", [this]() {
             auto& t = m_view->transform();
@@ -375,6 +441,7 @@ QWidget* DuckyWindow::createRightPanel() {
         {"Load State", [this]() { m_view->loadState("ducky_state.txt"); }},
         {"Screenshot", [this]() { m_view->takeScreenshot(); }},
         {"Lighting", [this]() { m_view->setLighting(!m_view->lighting()); }},
+        {"Export OBJ", [this]() { m_view->exportOBJ("ducky_export.obj"); }},
     };
 
     int cols = 3;
@@ -396,7 +463,7 @@ void DuckyWindow::syncInfoPanel() {
     unsigned int dims = m_view->dimensions();
     auto& t = m_view->transform();
 
-    const char* colorSchemeNames[4] = {"Model", "Rainbow", "Mono", "Depth"};
+    const char* colorSchemeNames[7] = {"Model", "Rainbow", "Mono", "Depth", "Rainbow2", "ND-Depth", "Vertex"};
     const char* renderModeNames[] = {"Perspective", "Orthographic", "Stereographic"};
 
     QString info;
@@ -405,6 +472,7 @@ void DuckyWindow::syncInfoPanel() {
     info += QString("Triangles: %1\n").arg(m.indexCount / 3);
     info += QString("Edges: %1\n").arg(m_view->edges().size());
     info += QString("Planes: %1\n").arg(t.planeCount());
+    info += QString("Subdiv: %1\n").arg(m_view->subdivisionLevel());
     info += QString("Focal Length: %1\n").arg(m_view->focalLength(), 0, 'f', 1);
     info += QString("Color Scheme: %1\n").arg(colorSchemeNames[m_view->colorScheme()]);
     info += QString("Wireframe: %1\n").arg(m_view->wireframe() ? "ON" : "OFF");

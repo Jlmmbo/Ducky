@@ -39,3 +39,5 @@ endif()
 if(EXISTS ${CMAKE_SOURCE_DIR}/shaders)
     file(COPY ${CMAKE_SOURCE_DIR}/shaders DESTINATION ${CMAKE_BINARY_DIR})
 endif()
+
+target_compile_definitions(ducky PRIVATE SHADER_DIR="${CMAKE_SOURCE_DIR}/shaders")

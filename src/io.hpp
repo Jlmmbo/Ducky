@@ -24,7 +24,7 @@ inline void writeTGA(const char* path, int w, int h, unsigned char* data) {
 
 inline void saveState(const char* path, const TransformND& t) {
     FILE* f = fopen(path, "w");
-    if (!f) { std::cerr << "Failed to save state\n"; return; }
+    if (!f) { std::cerr << "Failed to save state" << std::endl; return; }
     fprintf(f, "%u\n", t.dims);
     for (float a : t.angles) fprintf(f, "%.8f ", a);
     fprintf(f, "\n");
@@ -36,11 +36,11 @@ inline void saveState(const char* path, const TransformND& t) {
 
 inline bool loadState(const char* path, TransformND& t) {
     FILE* f = fopen(path, "r");
-    if (!f) { std::cerr << "Failed to load state\n"; return false; }
+    if (!f) { std::cerr << "Failed to load state" << std::endl; return false; }
     unsigned int dims;
     if (fscanf(f, "%u", &dims) != 1 || dims != t.dims) {
         fclose(f);
-        std::cerr << "State file dimension mismatch\n";
+        std::cerr << "State file dimension mismatch" << std::endl;
         return false;
     }
     std::vector<float> newAngles(t.planeCount());
