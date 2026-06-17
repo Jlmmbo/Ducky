@@ -109,17 +109,13 @@ inline void assignFaceColors(Model& model, int colorScheme) {
     unsigned int dims = model.dimensions;
     int fpv = dims + 3;
     unsigned int faces = model.indexCount / 3;
-    const float goldenRatio = 0.618033988749895f;
-
     for (unsigned int f = 0; f < faces; f++) {
         float h;
         switch (colorScheme) {
-            case 1: h = (float)f / (float)faces; break;
-            case 2: h = 0.6f; break;
-            case 3: h = 0.0f + (float)(f % 10) * 0.05f; break;
-            default: h = f * goldenRatio; h = h - floorf(h); break;
+            case 0: h = (float)f / (float)faces; break;
+            default: h = 0.6f; break;
         }
-        float s = (colorScheme == 2) ? 0.0f : 0.85f;
+        float s = (colorScheme == 1) ? 0.0f : 0.85f;
         float l = 0.45f + ((f / 8) % 3) * 0.2f;
         float r, g, b;
         hslToRgb(h, s, l, r, g, b);

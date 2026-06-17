@@ -351,7 +351,7 @@ QWidget* DuckyWindow::createRightPanel() {
         {"Reset All", [this]() { m_view->resetTransform(); }},
         {"Wireframe", [this]() { m_view->setWireframe(!m_view->wireframe()); }},
         {"Color Scheme", [this]() {
-            int sc = (m_view->colorScheme() + 1) % 5;
+            int sc = (m_view->colorScheme() + 1) % 4;
             m_view->setColorScheme(sc);
         }},
         {"Rotation", [this]() {
@@ -396,7 +396,7 @@ void DuckyWindow::syncInfoPanel() {
     unsigned int dims = m_view->dimensions();
     auto& t = m_view->transform();
 
-    const char* colorSchemeNames[5] = {"Model", "Golden", "Rainbow", "Mono", "Warm"};
+    const char* colorSchemeNames[4] = {"Model", "Rainbow", "Mono", "Depth"};
     const char* renderModeNames[] = {"Perspective", "Orthographic", "Stereographic"};
 
     QString info;

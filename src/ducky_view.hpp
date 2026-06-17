@@ -132,6 +132,9 @@ private:
     bool m_orbitMode = false;
     bool m_transparent = false;
     bool m_lighting = true;
+    mutable std::vector<float> m_vertexDepths;
+    float m_depthMin = 0.0f;
+    float m_depthMax = 1.0f;
     float m_modelAlpha = 0.35f;
     bool m_newControls = true;
     int m_subdivisionLevel = 4;

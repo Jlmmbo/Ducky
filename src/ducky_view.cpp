@@ -311,6 +311,31 @@ void DuckyView::paintGL() {
         }
     }
 
+    if (m_colorScheme == 5) {
+        m_vertexDepths.resize(m_model.vertexCount);
+        float minDist = INFINITY, maxDist = 0.0f;
+        for (unsigned int i = 0; i < m_model.vertexCount; i++) {
+            float distSq = 0.0f;
+            for (unsigned int d = 0; d < m_dims; d++) {
+                float v = m_rotatedND[i * m_dims + d];
+                distSq += v * v;
+            }
+            m_vertexDepths[i] = distSq;
+            if (distSq < minDist) minDist = distSq;
+            if (distSq > maxDist) maxDist = distSq;
+        }
+        m_depthMin = minDist;
+        m_depthMax = maxDist;
+        float range = maxDist - minDist;
+        if (range < 1e-8f) range = 1.0f;
+        for (unsigned int i = 0; i < m_model.vertexCount; i++) {
+            float t = (m_vertexDepths[i] - minDist) / range;
+            m_projectedVerts[i * 6 + 3] = 1.0f - t;
+            m_projectedVerts[i * 6 + 4] = 0.0f;
+            m_projectedVerts[i * 6 + 5] = t;
+        }
+    }
+
     if (g_debug) {
         m_farthestVertIndex = 0;
         float maxDistSq = 0;
@@ -539,9 +564,20 @@ void DuckyView::buildStereographicMesh() {
                     ndPos[d] = t2 * v0[d] + t0 * v1[d] + t1 * v2[d];
 
                 projectStereographic(ndPos, proj, m_dims, m_focalLength);
-                proj[3] = t2 * c0r + t0 * c1r + t1 * c2r;
-                proj[4] = t2 * c0g + t0 * c1g + t1 * c2g;
-                proj[5] = t2 * c0b + t0 * c1b + t1 * c2b;
+                if (m_colorScheme == 5) {
+                    float distSq = 0;
+                    for (unsigned int d = 0; d < m_dims; d++)
+                        distSq += ndPos[d] * ndPos[d];
+                    float t = (distSq - m_depthMin) / (m_depthMax - m_depthMin);
+                    t = std::max(0.0f, std::min(1.0f, t));
+                    proj[3] = 1.0f - t;
+                    proj[4] = 0.0f;
+                    proj[5] = t;
+                } else {
+                    proj[3] = t2 * c0r + t0 * c1r + t1 * c2r;
+                    proj[4] = t2 * c0g + t0 * c1g + t1 * c2g;
+                    proj[5] = t2 * c0b + t0 * c1b + t1 * c2b;
+                }
 
                 unsigned int vi = vertBase + rowOffset(S, i, j);
                 m_subdivVerts[vi * 6 + 0] = proj[0];
@@ -595,7 +631,7 @@ void DuckyView::setWireframe(bool on) { m_wireframeOnly = on; update(); }
 
 void DuckyView::setColorScheme(int scheme) {
     m_colorScheme = scheme;
-    if (scheme == 0)
+    if (scheme == 0 || scheme == 3)
         m_model.vertices = m_modelVertsBackup;
     else
         assignFaceColors(m_model, scheme - 1);
@@ -715,8 +751,8 @@ void DuckyView::keyPressEvent(QKeyEvent* e) {
         break;
     case Qt::Key_C:
         if (!(e->modifiers() & Qt::ControlModifier)) {
-            m_colorScheme = (m_colorScheme + 1) % 5;
-            if (m_colorScheme == 0)
+            m_colorScheme = (m_colorScheme + 1) % 4;
+            if (m_colorScheme == 0 || m_colorScheme == 3)
                 m_model.vertices = m_modelVertsBackup;
             else
                 assignFaceColors(m_model, m_colorScheme - 1);
