@@ -30,11 +30,14 @@ target_link_libraries(ducky
     OpenGL::GL
 )
 
-if(EXISTS ${CMAKE_SOURCE_DIR}/model.dky)
-    file(COPY ${CMAKE_SOURCE_DIR}/model.dky DESTINATION ${CMAKE_BINARY_DIR})
+if(EXISTS ${CMAKE_SOURCE_DIR}/models/model.dky)
+    file(COPY ${CMAKE_SOURCE_DIR}/models/model.dky DESTINATION ${CMAKE_BINARY_DIR})
 endif()
-if(EXISTS ${CMAKE_SOURCE_DIR}/model_5d.dky)
-    file(COPY ${CMAKE_SOURCE_DIR}/model_5d.dky DESTINATION ${CMAKE_BINARY_DIR})
+if(EXISTS ${CMAKE_SOURCE_DIR}/models/model_5d.dky)
+    file(COPY ${CMAKE_SOURCE_DIR}/models/model_5d.dky DESTINATION ${CMAKE_BINARY_DIR})
+endif()
+if(EXISTS ${CMAKE_SOURCE_DIR}/models/model_3d.dky)
+    file(COPY ${CMAKE_SOURCE_DIR}/models/model_3d.dky DESTINATION ${CMAKE_BINARY_DIR})
 endif()
 if(EXISTS ${CMAKE_SOURCE_DIR}/shaders)
     file(COPY ${CMAKE_SOURCE_DIR}/shaders DESTINATION ${CMAKE_BINARY_DIR})

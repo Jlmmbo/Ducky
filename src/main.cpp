@@ -8,7 +8,7 @@ bool g_debug = false;
 int main(int argc, char* argv[]) {
     QApplication app(argc, argv);
 
-    const char* modelPath = "model.dky";
+    const char* modelPath = "models/model.dky";
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-d") == 0)
             g_debug = true;
